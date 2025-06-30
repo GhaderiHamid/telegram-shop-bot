@@ -413,7 +413,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = requests.post(
-            "http://127.0.0.1:8000/payment",
+            "https://hamidstore.liara.run/payment",
             headers={'Content-Type': 'application/json'},
             json={
                 "user_id": user_id,
