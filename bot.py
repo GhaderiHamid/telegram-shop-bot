@@ -22,6 +22,7 @@ DB_PORT = int(os.environ.get("DB_PORT", 3306))
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_NAME = os.environ["DB_NAME"]
+RENDER_URL = os.environ["RENDER_URL"]
 
 # تنظیم لاگر
 logging.basicConfig(level=logging.INFO)
@@ -673,3 +674,11 @@ if __name__ == '__main__':
     import asyncio
     asyncio.run(set_webhook())
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
