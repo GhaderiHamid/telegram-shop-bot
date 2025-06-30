@@ -466,134 +466,149 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # 1. بررسی لاگین بودن کاربر
     if not context.user_data.get('logged_in'):
-        await query.message.reply_text("❗ ابتدا وارد شوید.")
+        await query.message.reply_text("❗ لطفاً ابتدا وارد حساب کاربری خود شوید.")
         return
 
     try:
-        # 1. بررسی سبد خرید
+        # 2. بررسی سبد خرید
         cart = context.user_data.get('cart', {})
         if not cart:
-            await query.message.reply_text("🛒 سبد خرید خالی است.")
+            await query.message.reply_text("🛒 سبد خرید شما خالی است.")
             return
 
-        # 2. دریافت اطلاعات کاربر
+        # 3. دریافت اطلاعات کاربر از دیتابیس
         email = context.user_data['user_email']
-        cursor.execute("SELECT id, first_name FROM users WHERE email = %s", (email,))
-        user = cursor.fetchone()
-        if not user:
-            await query.message.reply_text("❌ خطا در شناسایی کاربر.")
-            return
+        cursor.execute("SELECT id, first_name, phone FROM users WHERE email = %s", (email,))
+        user_data = cursor.fetchone()
         
-        user_id, first_name = user
-        products = []
-        subtotal = 0
-
-        # 3. آماده‌سازی داده‌های پرداخت
-        for prod_id, qty in cart.items():
-            cursor.execute("SELECT name, price, discount FROM products WHERE id = %s", (prod_id,))
-            product_data = cursor.fetchone()
-            if not product_data:
-                continue
+        if not user_data:
+            await query.message.reply_text("❌ اطلاعات کاربر یافت نشد.")
+            return
             
-            name, price, discount = product_data
+        user_id, first_name, phone = user_data
+
+        # 4. محاسبه مبلغ کل و آماده‌سازی آیتم‌ها
+        order_items = []
+        total_amount = 0
+        
+        for product_id, quantity in cart.items():
+            cursor.execute(
+                "SELECT name, price, discount FROM products WHERE id = %s",
+                (product_id,)
+            )
+            product = cursor.fetchone()
+            
+            if not product:
+                continue
+                
+            name, price, discount = product
             final_price = int(price * (1 - discount / 100))
-            subtotal += final_price * qty
-            products.append({
-                "product_id": prod_id,
+            item_total = final_price * quantity
+            total_amount += item_total
+            
+            order_items.append({
+                "id": product_id,
                 "name": name,
-                "unit_price": int(price),
-                "discount": int(discount),
-                "quantity": qty,
-                "total_price": final_price * qty
+                "price": price,
+                "discount": discount,
+                "quantity": quantity,
+                "total": item_total
             })
 
-        # 4. نمایش خلاصه سفارش
-        summary_msg = f"🧾 فاکتور خرید برای {first_name}\n\n"
-        for item in products:
-            summary_msg += f"▫️ {item['name']}\n"
-            summary_msg += f"  - تعداد: {item['quantity']}\n"
-            summary_msg += f"  - قیمت واحد: {format_price(item['unit_price'])} تومان\n"
-            summary_msg += f"  - تخفیف: {item['discount']}%\n"
-            summary_msg += f"  - جمع: {format_price(item['total_price'])} تومان\n\n"
+        # 5. نمایش خلاصه فاکتور به کاربر
+        invoice_text = f"🧾 فاکتور خرید برای {first_name}\n\n"
+        for item in order_items:
+            invoice_text += (
+                f"▫️ {item['name']}\n"
+                f"  - تعداد: {item['quantity']}\n"
+                f"  - قیمت واحد: {format_price(item['price'])} تومان\n"
+                f"  - تخفیف: {item['discount']}%\n"
+                f"  - جمع: {format_price(item['total'])} تومان\n\n"
+            )
+        invoice_text += f"💰 مبلغ قابل پرداخت: {format_price(total_amount)} تومان"
         
-        summary_msg += f"💰 مبلغ قابل پرداخت: {format_price(subtotal)} تومان"
-        await query.message.reply_text(summary_msg)
+        await query.message.reply_text(invoice_text)
 
-        # 5. آماده‌سازی درخواست پرداخت
-        payment_payload = {
-            "user_id": user_id,
-            "user_name": first_name,
-            "total_amount": int(subtotal),
+        # 6. آماده‌سازی درخواست پرداخت
+        payment_data = {
+            "user": {
+                "id": user_id,
+                "name": first_name,
+                "email": email,
+                "mobile": phone
+            },
+            "amount": total_amount,
             "currency": "IRR",
-            "items": products,
-            "callback_url": f"{RENDER_URL}/payment-callback"  # آدرس بازگشت پس از پرداخت
+            "items": order_items,
+            "callback_url": f"{RENDER_URL}/payment/verify",
+            "metadata": {
+                "bot": True,
+                "source": "telegram_bot"
+            }
         }
 
-        logger.info(f"Payment payload: {json.dumps(payment_payload, indent=2, ensure_ascii=False)}")
-
+        # 7. ارسال درخواست پرداخت با کنترل کامل
         try:
-            # 6. استفاده از requests.Session برای کنترل بهتر
+            # استفاده از session برای مدیریت بهتر
             with requests.Session() as session:
                 session.headers.update({
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
-                    'User-Agent': 'TelegramShopBot/1.0'
+                    'Authorization': f'Bearer {TOKEN[:10]}...'  # برای امنیت
                 })
                 
-                # اضافه کردن تایم‌اوت و ریدایرکت
+                # لاگ قبل از ارسال
+                logger.info(f"Payment request to {PAYMENT_API_URL}")
+                logger.debug(f"Request payload: {json.dumps(payment_data, indent=2)}")
+                
                 response = session.post(
                     PAYMENT_API_URL,
-                    json=payment_payload,  # استفاده از پارامتر json به جای data
+                    json=payment_data,  # استفاده از json به جای data
                     timeout=20,
                     allow_redirects=False
                 )
-
-            logger.info(f"Payment API response: Status={response.status_code}, Body={response.text}")
-
-            # 7. پردازش پاسخ
-            if response.status_code == 200:
-                try:
-                    result = response.json()
-                    if result.get('status') == 'success' or result.get('success'):
-                        payment_url = result.get('payment_url') or result.get('url')
-                        if payment_url:
-                            # ایجاد دکمه‌های پرداخت
-                            markup = InlineKeyboardMarkup([
-                                [InlineKeyboardButton("💳 پرداخت آنلاین", url=payment_url)],
-                                [InlineKeyboardButton("🔍 وضعیت پرداخت", callback_data=f"payment_status_{user_id}")]
-                            ])
-                            await query.message.reply_text(
-                                "برای تکمیل پرداخت روی دکمه زیر کلیک کنید:",
-                                reply_markup=markup
-                            )
-                            return
-                        raise Exception("لینک پرداخت در پاسخ وجود ندارد")
+                
+                # پردازش پاسخ
+                response.raise_for_status()  # خطا برای وضعیت‌های 4xx/5xx
+                
+                result = response.json()
+                
+                if not result.get('success'):
                     raise Exception(result.get('message', 'پرداخت ناموفق بود'))
-                except ValueError:
-                    raise Exception("پاسخ نامعتبر از سرور پرداخت")
-            elif response.status_code == 405:
-                # خطای خاص 405 - بررسی دقیق‌تر
-                error_detail = ("مطمئن شوید:\n"
-                              "1. آدرس درست است\n"
-                              "2. از متد POST استفاده می‌کنید\n"
-                              "3. هدر Content-Type: application/json ارسال شده\n"
-                              f"4. سرور پرداخت فعال است (آدرس: {PAYMENT_API_URL})")
-                raise Exception(f"متد غیرمجاز (405)\n{error_detail}")
-            else:
-                raise Exception(f"خطای سرور: کد {response.status_code}")
+                
+                payment_url = result.get('payment_url')
+                if not payment_url:
+                    raise Exception("لینک پرداخت در پاسخ وجود ندارد")
+                
+                # 8. نمایش دکمه پرداخت به کاربر
+                keyboard = [
+                    [InlineKeyboardButton("💳 پرداخت آنلاین", url=payment_url)],
+                    [InlineKeyboardButton("✅ پرداخت انجام شد", callback_data="verify_payment")]
+                ]
+                await query.message.reply_text(
+                    "برای پرداخت آنلاین روی دکمه زیر کلیک کنید:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
 
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"خطا در ارتباط با سرور پرداخت: {str(e)}")
+        except requests.exceptions.HTTPError as http_err:
+            if http_err.response.status_code == 405:
+                raise Exception("سرور پرداخت متد POST را نمی‌پذیرد. لطفاً با پشتیبانی تماس بگیرید.")
+            raise Exception(f"خطای HTTP: {str(http_err)}")
+            
+        except Exception as e:
+            raise Exception(f"خطا در پرداخت: {str(e)}")
 
     except Exception as e:
+        logger.error(f"Payment failed: {str(e)}", exc_info=True)
         error_msg = f"❌ خطا در پردازش پرداخت:\n{str(e)}"
-        logger.error(error_msg)
-        # اگر پیام خطا خیلی طولانی است
+        
+        # کوتاه کردن پیام خطا اگر خیلی طولانی است
         if len(error_msg) > 4000:
-            error_msg = "❌ خطا در پردازش پرداخت. لطفاً لحظاتی دیگر تلاش کنید یا با پشتیبانی تماس بگیرید."
+            error_msg = "❌ خطا در انجام پرداخت. لطفاً دقایقی دیگر تلاش کنید."
+        
         await query.message.reply_text(error_msg)
-
 
 
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
