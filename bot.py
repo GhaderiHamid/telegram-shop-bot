@@ -645,32 +645,31 @@ app.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"
 app.add_handler(CallbackQueryHandler(button_click))  # هندلر ثبت‌نام و ورود
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# ------------------- تنظیم Webhook با Flask -------------------
 
+# ✳️ ساخت Flask اپ
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
     return "✅ Bot is running."
 
-@app.route(f'/{TOKEN}', methods=["POST"])
+@flask_app.route(f'/{TOKEN}', methods=["POST"])
 async def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
     await application.update_queue.put(update)
     return "ok"
 
-# تنظیم Webhook به‌صورت async پس از ساخت اپلیکیشن
+# ✳️ تنظیم Webhook روی Telegram
 async def set_webhook():
-    render_url = os.environ.get("RENDER_URL")  # مثلاً: https://your-bot-name.onrender.com
-    if render_url:
-        webhook_url = f"{render_url}/{TOKEN}"
+    if RENDER_URL:
+        webhook_url = f"{RENDER_URL}/{TOKEN}"
         await application.bot.set_webhook(url=webhook_url)
         logging.info(f"Webhook set to: {webhook_url}")
     else:
-        logging.warning("RENDER_URL not set. Skipping webhook setup.")
+        logging.warning("RENDER_URL not set.")
 
-# اجرای Flask سرور
+# ✳️ اجرای نهایی
 if __name__ == '__main__':
     import asyncio
     asyncio.run(set_webhook())
-    flask_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
