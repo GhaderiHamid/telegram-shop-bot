@@ -5,5 +5,3 @@ bcrypt
 requests
 jdatetime
 python-dotenv
-
-
