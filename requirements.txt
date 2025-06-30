@@ -1,7 +1,9 @@
+# python-telegram-bot==22.0
+# # flask[async]
+# mysql-connector-python
+# bcrypt
+# requests
+# jdatetime
+# python-dotenv
 python-telegram-bot==22.0
-# flask[async]
-mysql-connector-python
-bcrypt
-requests
-jdatetime
 python-dotenv

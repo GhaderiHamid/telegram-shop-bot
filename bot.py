@@ -686,7 +686,7 @@ import bcrypt
 import requests
 import jdatetime
 from dotenv import load_dotenv
-from flask import Flask, request
+# from flask import Flask, request
 from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -730,13 +730,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ دستور نامعتبر. لطفاً /start را امتحان کنید.")
 
+
+# هندلرها
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
 
-# ✳️ اجرای Webhook
+# تابع برای تنظیم Webhook
+async def set_webhook():
+    url = f"{RENDER_URL}/{TOKEN}"
+    await application.bot.set_webhook(url=url)
+    logging.info(f"Webhook set to: {url}")
+
+# ✳️ اجرای Webhook با تنظیم قبلی
 if __name__ == '__main__':
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        webhook_url=f"{RENDER_URL}/{TOKEN}"
-    )
+    import asyncio
+
+    async def main():
+        await application.initialize()
+        await set_webhook()
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.environ.get("PORT", 5000)),
+            webhook_url=f"{RENDER_URL}/{TOKEN}"
+        )
+
+    asyncio.run(main())
