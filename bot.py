@@ -1,22 +1,5 @@
-import os
 import json
 import bcrypt
-import requests
-import jdatetime
-import mysql.connector
-from datetime import datetime
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
-
-# بارگذاری متغیرهای محیطی
 import os
 import logging
 import requests
@@ -670,10 +653,10 @@ flask_app = Flask(__name__)
 def home():
     return "✅ Bot is running."
 
-@flask_app.route(f'/{TOKEN}', methods=["POST"])
-def webhook():
+@app.route(f'/{TOKEN}', methods=["POST"])
+async def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    application.update_queue.put(update)
+    await application.update_queue.put(update)
     return "ok"
 
 # تنظیم Webhook به‌صورت async پس از ساخت اپلیکیشن
