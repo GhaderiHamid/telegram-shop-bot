@@ -16,15 +16,34 @@ from telegram.ext import (
     filters
 )
 
-# بارگیری متغیرهای محیطی
-TOKEN = os.getenv("TOKEN")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = int(os.getenv("DB_PORT"))
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_NAME = os.getenv("DB_NAME")
+# بارگذاری متغیرهای محیطی
+import os
+import logging
+import requests
+import jdatetime
+from dotenv import load_dotenv
+from flask import Flask, request
+from datetime import datetime
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
+)
+import mysql.connector
 
-# اتصال به پایگاه داده
+# بارگذاری متغیرهای محیطی
+load_dotenv()
+TOKEN = os.environ["TOKEN"]
+DB_HOST = os.environ["DB_HOST"]
+DB_PORT = int(os.environ.get("DB_PORT", 3306))
+DB_USER = os.environ["DB_USER"]
+DB_PASSWORD = os.environ["DB_PASSWORD"]
+DB_NAME = os.environ["DB_NAME"]
+
+# تنظیم لاگر
+logging.basicConfig(level=logging.INFO)
+
+# اتصال به دیتابیس
 db = mysql.connector.connect(
     host=DB_HOST,
     port=DB_PORT,
@@ -33,6 +52,16 @@ db = mysql.connector.connect(
     database=DB_NAME
 )
 cursor = db.cursor()
+
+# اپلیکیشن تلگرام
+application = ApplicationBuilder().token(TOKEN).build()
+
+# ------------------- توابع بات -------------------
+
+
+
+
+
 
 # حالت‌ها برای تعامل کاربر
 STATES = {
@@ -633,5 +662,32 @@ app.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"
 app.add_handler(CallbackQueryHandler(button_click))  # هندلر ثبت‌نام و ورود
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# اجرای ربات
-app.run_polling()
+# ------------------- تنظیم Webhook با Flask -------------------
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "✅ Bot is running."
+
+@flask_app.route(f'/{TOKEN}', methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.update_queue.put(update)
+    return "ok"
+
+# تنظیم Webhook به‌صورت async پس از ساخت اپلیکیشن
+async def set_webhook():
+    render_url = os.environ.get("RENDER_URL")  # مثلاً: https://your-bot-name.onrender.com
+    if render_url:
+        webhook_url = f"{render_url}/{TOKEN}"
+        await application.bot.set_webhook(url=webhook_url)
+        logging.info(f"Webhook set to: {webhook_url}")
+    else:
+        logging.warning("RENDER_URL not set. Skipping webhook setup.")
+
+# اجرای Flask سرور
+if __name__ == '__main__':
+    import asyncio
+    asyncio.run(set_webhook())
+    flask_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
