@@ -624,27 +624,27 @@ async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await show_orders(fake_update, context)
 
 # ⏬ راه‌اندازی نهایی ربات و تعریف تمام هندلرها
-app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(start_menu_handler, pattern="^menu_"))
-app.add_handler(CommandHandler("login", login))
-app.add_handler(CommandHandler("categories", categories_command))
-app.add_handler(CommandHandler("search", search_products))
-app.add_handler(CommandHandler("cart", show_cart))
-app.add_handler(CommandHandler("orders", show_orders))
 
-app.add_handler(CallbackQueryHandler(show_products, pattern="^categoryid_"))
-app.add_handler(CallbackQueryHandler(pagination_handler, pattern="^(next_page|prev_page)$"))
-app.add_handler(CallbackQueryHandler(add_bookmark_handler, pattern="^bookmark_"))
-app.add_handler(CallbackQueryHandler(add_to_cart_handler, pattern="^addcart_"))
-app.add_handler(CallbackQueryHandler(remove_from_cart_handler, pattern="^remove_cart_"))  # 👈 این خط باید باشه
-app.add_handler(CallbackQueryHandler(pay_cart_handler, pattern="^pay_cart$"))
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(start_menu_handler, pattern="^menu_"))
+application.add_handler(CommandHandler("login", login))
+application.add_handler(CommandHandler("categories", categories_command))
+application.add_handler(CommandHandler("search", search_products))
+application.add_handler(CommandHandler("cart", show_cart))
+application.add_handler(CommandHandler("orders", show_orders))
 
-app.add_handler(CallbackQueryHandler(orders_pagination_handler, pattern="^orders_(next_page|prev_page)$"))
-app.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"))
-app.add_handler(CallbackQueryHandler(button_click))  # هندلر ثبت‌نام و ورود
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+application.add_handler(CallbackQueryHandler(show_products, pattern="^categoryid_"))
+application.add_handler(CallbackQueryHandler(pagination_handler, pattern="^(next_page|prev_page)$"))
+application.add_handler(CallbackQueryHandler(add_bookmark_handler, pattern="^bookmark_"))
+application.add_handler(CallbackQueryHandler(add_to_cart_handler, pattern="^addcart_"))
+application.add_handler(CallbackQueryHandler(remove_from_cart_handler, pattern="^remove_cart_"))  # 👈 این خط باید باشه
+application.add_handler(CallbackQueryHandler(pay_cart_handler, pattern="^pay_cart$"))
+
+application.add_handler(CallbackQueryHandler(orders_pagination_handler, pattern="^orders_(next_page|prev_page)$"))
+application.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"))
+application.add_handler(CallbackQueryHandler(button_click))  # هندلر ثبت‌نام و ورود
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 
 # ✳️ ساخت Flask اپ
@@ -672,9 +672,13 @@ async def set_webhook():
 # ✳️ اجرای نهایی
 if __name__ == '__main__':
     import asyncio
-    asyncio.run(set_webhook())
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
+    async def main():
+        await application.initialize()  # 🔑 مهم‌ترین بخش
+        await set_webhook()
+        flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+    asyncio.run(main())
 
 
 
