@@ -721,52 +721,24 @@ cursor = db.cursor()
 # ───────── اپ تلگرام
 application = ApplicationBuilder().token(TOKEN).build()
 
-# ───────── شروع سریع برای تست
+async def post_init(app):
+    app.create_task(app.start())
+
+application.post_init(post_init)
+
+# هندلر تست شروع
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("ورود / ثبت‌نام", callback_data='menu_login')],
-        [InlineKeyboardButton("دسته‌بندی محصولات", callback_data='menu_categories')],
-        [InlineKeyboardButton("سبد خرید", callback_data='menu_cart')],
-        [InlineKeyboardButton("سفارش‌ها", callback_data='menu_orders')],
-    ]
-    await update.message.reply_text("🎉 به فروشگاه خوش اومدی!", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("🎉 به فروشگاه خوش اومدی!")
 
-# ───────── واکشی دسته‌بندی‌ها
-async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cursor.execute("SELECT id, category_name FROM categories")
-    rows = cursor.fetchall()
-    if not rows:
-        await update.message.reply_text("❌ هیچ دسته‌ای یافت نشد.")
-        return
-    buttons = [[InlineKeyboardButton(name, callback_data=f"categoryid_{cid}")] for cid, name in rows]
-    await update.message.reply_text("📚 دسته‌بندی‌ها:", reply_markup=InlineKeyboardMarkup(buttons))
+# هندلر fallback
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ فرمان ناشناخته. لطفاً از /start استفاده کن.")
 
-# ───────── هندلر دکمه‌های منو
-async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    fake_update = Update(update.update_id, message=query.message)
-    if data == 'menu_login':
-        await query.message.reply_text("🔐 هنوز پیاده‌سازی نشده!")
-    elif data == 'menu_categories':
-        await categories_command(fake_update, context)
-    elif data == 'menu_cart':
-        await query.message.reply_text("🛒 هنوز سبد خرید متصل نیست")
-    elif data == 'menu_orders':
-        await query.message.reply_text("📦 سفارش‌ها هنوز پیاده‌سازی نشده")
-
-# ───────── هندلر ناشناس
-async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ فرمان ناشناخته. لطفاً از منو استفاده کن.")
-
-# ───────── ثبت هندلرها
+# ثبت هندلرها
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("categories", categories_command))
-application.add_handler(CallbackQueryHandler(start_menu_handler, pattern="^menu_"))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
 
-# ───────── Flask app
+# ساخت اپ Flask
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -774,25 +746,24 @@ def home():
     return "✅ Bot is running."
 
 @flask_app.route(f"/{TOKEN}", methods=["POST"])
-async def telegram_webhook():
+async def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
     await application.update_queue.put(update)
     return "ok"
 
-# ───────── تنظیم Webhook
+# تنظیم Webhook
 async def set_webhook():
     webhook_url = f"{RENDER_URL}/{TOKEN}"
     await application.bot.set_webhook(url=webhook_url)
     logging.info(f"Webhook set to: {webhook_url}")
 
-# ───────── اجرای نهایی
+# اجرای نهایی
 if __name__ == '__main__':
     import asyncio
 
     async def main():
         await application.initialize()
         await set_webhook()
-        await application.start()
         flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
     asyncio.run(main())
