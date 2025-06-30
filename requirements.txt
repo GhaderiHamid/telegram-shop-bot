@@ -1,5 +1,5 @@
 python-telegram-bot==22.0
-flask
+flask[async]
 mysql-connector-python
 bcrypt
 requests
