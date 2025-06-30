@@ -688,20 +688,17 @@ from telegram.ext import (
 )
 import mysql.connector
 
-# ───────── بارگذاری متغیرهای محیطی
+# ───── بارگذاری .env
 load_dotenv()
 TOKEN = os.environ["TOKEN"]
+RENDER_URL = os.environ["RENDER_URL"]
 DB_HOST = os.environ["DB_HOST"]
 DB_PORT = int(os.environ.get("DB_PORT", 3306))
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_NAME = os.environ["DB_NAME"]
-RENDER_URL = os.environ["RENDER_URL"]
 
-# ───────── لاگ
-logging.basicConfig(level=logging.INFO)
-
-# ───────── اتصال به دیتابیس
+# ───── اتصال به دیتابیس
 db = mysql.connector.connect(
     host=DB_HOST,
     port=DB_PORT,
@@ -711,38 +708,44 @@ db = mysql.connector.connect(
 )
 cursor = db.cursor()
 
-# ───────── اپلیکیشن تلگرام
+# ───── تنظیم لاگ
+logging.basicConfig(level=logging.INFO)
+
+# ───── اپلیکیشن تلگرام
 application = ApplicationBuilder().token(TOKEN).build()
 
-# هندلر تست شروع
+# هندلر تست
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎉 ربات به درستی کار می‌کند!")
 
-# هندلر fallback
+# هندلر ناشناس
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ دستور نامعتبر. لطفاً /start را امتحان کنید.")
+    await update.message.reply_text("❌ دستور ناشناخته. لطفاً /start را امتحان کنید.")
 
 # افزودن هندلرها
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
 
-# تابع تنظیم Webhook
+# تنظیم Webhook برای تلگرام
 async def set_webhook():
     url = f"{RENDER_URL}/{TOKEN}"
     await application.bot.set_webhook(url=url)
     logging.info(f"Webhook set to: {url}")
 
-# اجرای ربات با Webhook
+# اجرای اپ
+async def main():
+    await application.initialize()
+    await set_webhook()
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        webhook_url=f"{RENDER_URL}/{TOKEN}"
+    )
+
+# اجرای ایمن برای Python 3.13
 if __name__ == '__main__':
     import asyncio
 
-    async def main():
-        await application.initialize()
-        await set_webhook()
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=int(os.environ.get("PORT", 5000)),
-            webhook_url=f"{RENDER_URL}/{TOKEN}"
-        )
-
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
