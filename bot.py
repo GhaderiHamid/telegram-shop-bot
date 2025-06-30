@@ -719,51 +719,24 @@ db = mysql.connector.connect(
 cursor = db.cursor()
 
 # ───────── اپ تلگرام
+
+# ساخت Application
 application = ApplicationBuilder().token(TOKEN).build()
 
-async def post_init(app):
-    app.create_task(app.start())
-
-application.post_init(post_init)
-
-# هندلر تست شروع
+# ✳️ هندلرهای ساده برای تست
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎉 به فروشگاه خوش اومدی!")
+    await update.message.reply_text("🎉 ربات به درستی کار می‌کند!")
 
-# هندلر fallback
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ فرمان ناشناخته. لطفاً از /start استفاده کن.")
+    await update.message.reply_text("❌ دستور نامعتبر. لطفاً /start را امتحان کنید.")
 
-# ثبت هندلرها
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
 
-# ساخت اپ Flask
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
-def home():
-    return "✅ Bot is running."
-
-@flask_app.route(f"/{TOKEN}", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.update_queue.put(update)
-    return "ok"
-
-# تنظیم Webhook
-async def set_webhook():
-    webhook_url = f"{RENDER_URL}/{TOKEN}"
-    await application.bot.set_webhook(url=webhook_url)
-    logging.info(f"Webhook set to: {webhook_url}")
-
-# اجرای نهایی
+# ✳️ اجرای Webhook
 if __name__ == '__main__':
-    import asyncio
-
-    async def main():
-        await application.initialize()
-        await set_webhook()
-        flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-    asyncio.run(main())
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        webhook_url=f"{RENDER_URL}/{TOKEN}"
+    )
