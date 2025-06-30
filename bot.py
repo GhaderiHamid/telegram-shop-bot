@@ -487,13 +487,15 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         products = []
         subtotal = 0
 
+        # ساخت خلاصه محصولات برای نمایش به کاربر
+        product_summary = []
         for prod_id, qty in cart.items():
-            cursor.execute("SELECT price, discount FROM products WHERE id = %s", (prod_id,))
+            cursor.execute("SELECT name, price, discount FROM products WHERE id = %s", (prod_id,))
             p = cursor.fetchone()
             if not p: 
                 continue
             
-            price, discount = p
+            name, price, discount = p
             final_price = int(price * (1 - discount / 100))
             subtotal += final_price * qty
             products.append({
@@ -502,16 +504,31 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "discount": int(discount),
                 "quantity": qty
             })
+            product_summary.append(f"{name} - {qty} عدد - {format_price(final_price)} تومان")
 
-        logger.info(f"Preparing payment request for user {user_id}")
+        # نمایش خلاصه سفارش
+        summary_message = (
+            "📝 خلاصه سفارش:\n\n" +
+            "\n".join(product_summary) +
+            f"\n\n💰 جمع کل: {format_price(subtotal)} تومان"
+        )
         
+        # ارسال خلاصه سفارش در چند پیام اگر طولانی باشد
+        if len(summary_message) > 4000:
+            chunks = [summary_message[i:i+4000] for i in range(0, len(summary_message), 4000)]
+            for chunk in chunks:
+                await query.message.reply_text(chunk)
+        else:
+            await query.message.reply_text(summary_message)
+
+        # ارسال درخواست پرداخت
         payment_data = {
             "user_id": user_id,
             "subtotal": int(subtotal),
             "products": products
         }
 
-        logger.info(f"Payment data: {json.dumps(payment_data, indent=2)}")
+        logger.info(f"Payment request data: {json.dumps(payment_data, indent=2)}")
         
         try:
             response = requests.post(
@@ -521,34 +538,45 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     'Accept': 'application/json'
                 },
                 json=payment_data,
-                timeout=10
+                timeout=15
             )
 
             logger.info(f"Payment API response: {response.status_code}, {response.text}")
 
             if response.status_code == 200:
-                res_json = response.json()
-                if res_json.get("success"):
-                    payment_url = res_json.get("payment_url")
-                    if payment_url:
-                        button = InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔗 مشاهده صفحه پرداخت", url=payment_url)]
-                        ])
-                        await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=button)
-                        return
+                try:
+                    res_json = response.json()
+                    if res_json.get("success"):
+                        payment_url = res_json.get("payment_url")
+                        if payment_url:
+                            button = InlineKeyboardMarkup([
+                                [InlineKeyboardButton("🔗 پرداخت آنلاین", url=payment_url)],
+                                [InlineKeyboardButton("✅ پرداخت انجام شد", callback_data="payment_done")]
+                            ])
+                            await query.message.reply_text(
+                                "برای تکمیل پرداخت روی دکمه زیر کلیک کنید:",
+                                reply_markup=button
+                            )
+                            return
+                except json.JSONDecodeError:
+                    logger.error("Invalid JSON response from payment API")
             
-            await query.message.reply_text(
-                f"❌ خطا در پرداخت. کد وضعیت: {response.status_code}\n{response.text}"
-            )
+            # نمایش خطای دقیق تر به کاربر
+            error_msg = "❌ خطا در ارتباط با درگاه پرداخت"
+            if response.status_code == 405:
+                error_msg = "❌ درخواست پرداخت نامعتبر است (خطای 405)"
+            elif response.status_code >= 500:
+                error_msg = "❌ مشکل در سرور پرداخت، لطفاً稍后再试"
+            
+            await query.message.reply_text(error_msg)
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Payment request failed: {e}")
+            logger.error(f"Payment request failed: {str(e)}")
             await query.message.reply_text("❌ خطا در ارتباط با سرور پرداخت. لطفاً稍后再试")
         
     except Exception as e:
-        logger.error(f"Payment processing error: {e}")
-        await query.message.reply_text(f"❌ خطا در پرداخت: {str(e)}")
-
+        logger.error(f"Payment processing error: {str(e)}")
+        await query.message.reply_text("❌ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.")
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
         await update.message.reply_text("❗ ابتدا وارد شوید.")
