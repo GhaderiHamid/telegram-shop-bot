@@ -685,8 +685,7 @@ async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             message=DummyMessage(query.message.chat, query.from_user)
         )
         await show_orders(dummy_update, context)
-import os
-from telegram.ext import ApplicationBuilder
+
 
 PORT = int(os.environ.get('PORT', 8443))  # پورت پیش‌فرض 8443 برای webhook
 
