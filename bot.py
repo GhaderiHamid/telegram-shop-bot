@@ -485,7 +485,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             })
 
         response = requests.post(
-            "https://google.com",
+            "https://hamidstore.liara.run/payment",
             headers={'Content-Type': 'application/json'},
             json={
                 "user_id": user_id,
