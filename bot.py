@@ -442,30 +442,26 @@ async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در حذف از سبد خرید: {e}")
 
+
+PAYMENT_SERVICE_URL = "https://hamidstore.liara.run/payment"
+
 async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if not context.user_data.get('logged_in'):
-        await query.message.reply_text("❗ برای پرداخت باید ابتدا وارد شوید.")
-        return
-
-    cart = context.user_data.get('cart', {})
-    if not cart:
-        await query.message.reply_text("🛒 سبد خرید شما خالی است.")
-        return
-
     try:
-        products = []
-        subtotal = 0
+        # فرض می‌کنیم cart و email قبلاً ذخیره شده‌اند
+        cart = context.user_data.get('cart', {})
         email = context.user_data.get('user_email')
 
+        # دریافت user_id از دیتابیس
         cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         user_result = cursor.fetchone()
-        if not user_result:
-            await query.message.reply_text("❌ خطا در دریافت اطلاعات کاربر!")
-            return
-        user_id = user_result[0]
+        user_id = user_result[0] if user_result else None
+
+        # جمع‌آوری محصولات و محاسبه subtotal
+        products = []
+        subtotal = 0
 
         for prod_id, quantity in cart.items():
             cursor.execute("SELECT id, price, discount FROM products WHERE id = %s", (prod_id,))
@@ -484,38 +480,32 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "quantity": quantity
             })
 
+        # ساخت دیتا برای ارسال
         payment_data = {
             "user_id": user_id,
-            "subtotal": int(subtotal),
+            "subtotal": subtotal,
             "products": products,
-            "chat_id": query.message.chat_id,
+            "chat_id": query.message.chat_id
         }
 
-        # تبدیل به JSON و ارسال بدون انتظار برای پاسخ
+        # ارسال POST request به سرور
         headers = {'Content-Type': 'application/json'}
-        
-        # استفاده از requests.post با timeout بسیار کوتاه و عدم بررسی پاسخ
-        try:
-            requests.post(
-                "https://hamidstore.liara.run/payment",
-                json=payment_data,
-                headers=headers,
-                timeout=1  # timeout کوتاه برای عدم انتظار طولانی
-            )
-        except:
-            pass  # به عمد هیچ کاری با خطاها نمی‌کنیم
-        
-        # پیام به کاربر
-        await query.message.reply_text("✅ درخواست پرداخت شما ارسال شد. لطفاً برای تکمیل پرداخت به پیام‌های بعدی توجه کنید.")
-        
-        # پاک کردن سبد خرید
-        if 'cart' in context.user_data:
-            del context.user_data['cart']
+        requests.post(PAYMENT_SERVICE_URL, json=payment_data, headers=headers)
+
+        # ساخت و ارسال دکمه پرداخت برای کاربر
+        keyboard = [[InlineKeyboardButton("🔗 رفتن به صفحه پرداخت", url=PAYMENT_SERVICE_URL)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
 
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در پردازش درخواست پرداخت: {str(e)}")
+        await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت: {str(e)}")
+    
     finally:
         refresh_db_connection()
+
+
+
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
         await update.message.reply_text("❗ برای مشاهده سفارش‌ها باید ابتدا وارد شوید.")
