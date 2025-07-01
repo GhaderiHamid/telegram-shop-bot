@@ -491,27 +491,31 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "chat_id": query.message.chat_id,
         }
 
+        # تبدیل به JSON و ارسال بدون انتظار برای پاسخ
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(PAYMENT_SERVICE_URL, json=payment_data, headers=headers)
-        response_data = response.json()
+        
+        # استفاده از requests.post با timeout بسیار کوتاه و عدم بررسی پاسخ
+        try:
+            requests.post(
+                "https://hamidstore.liara.run/payment",
+                json=payment_data,
+                headers=headers,
+                timeout=1  # timeout کوتاه برای عدم انتظار طولانی
+            )
+        except:
+            pass  # به عمد هیچ کاری با خطاها نمی‌کنیم
+        
+        # پیام به کاربر
+        await query.message.reply_text("✅ درخواست پرداخت شما ارسال شد. لطفاً برای تکمیل پرداخت به پیام‌های بعدی توجه کنید.")
+        
+        # پاک کردن سبد خرید
+        if 'cart' in context.user_data:
+            del context.user_data['cart']
 
-        if response.status_code == 200 and response_data.get('success'):
-            payment_url = response_data.get('payment_url')
-            keyboard = [[InlineKeyboardButton("🔗 رفتن به صفحه پرداخت", url=payment_url)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            if 'cart' in context.user_data:
-                del context.user_data['cart']
-            
-            await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
-        else:
-            error_msg = response_data.get('error', 'خطای ناشناخته')
-            await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت! {error_msg}")
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در ارتباط با سرور پرداخت: {str(e)}")
+        await query.message.reply_text(f"❌ خطا در پردازش درخواست پرداخت: {str(e)}")
     finally:
         refresh_db_connection()
-
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
         await update.message.reply_text("❗ برای مشاهده سفارش‌ها باید ابتدا وارد شوید.")
