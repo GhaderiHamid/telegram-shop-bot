@@ -545,8 +545,8 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup(keyboard)
            
             
-            if 'cart' in context.user_data:
-                del context.user_data['cart']
+            # if 'cart' in context.user_data:
+            #     del context.user_data['cart']
                 
             
             await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
