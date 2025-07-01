@@ -1,59 +1,35 @@
-import json
-import bcrypt
 import os
-import logging
-import requests
-import jdatetime
-from dotenv import load_dotenv
-from flask import Flask, request
-from datetime import datetime
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters
-)
 import mysql.connector
-from threading import Thread
-import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import bcrypt
+import requests
+from dotenv import load_dotenv
 
-# بارگذاری متغیرهای محیطی
+# Load environment variables
 load_dotenv()
-TOKEN = os.environ["TOKEN"]
-DB_HOST = os.environ["DB_HOST"]
-DB_PORT = int(os.environ.get("DB_PORT", 3306))
-DB_USER = os.environ["DB_USER"]
-DB_PASSWORD = os.environ["DB_PASSWORD"]
-DB_NAME = os.environ["DB_NAME"]
-RENDER_URL = os.environ["RENDER_URL"]
 
-# تنظیم لاگر
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Configuration from environment variables
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
+PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "https://hamidstore.liara.run/payment")
 
-# اتصال به دیتابیس
-try:
-    db = mysql.connector.connect(
+# Database connection
+def get_db_connection():
+    return mysql.connector.connect(
         host=DB_HOST,
-        port=DB_PORT,
         user=DB_USER,
         password=DB_PASSWORD,
         database=DB_NAME
     )
-    cursor = db.cursor()
-    logger.info("✅ Connected to database successfully")
-except Exception as e:
-    logger.error(f"❌ Database connection failed: {e}")
-    raise
 
-# اپلیکیشن تلگرام
-application = ApplicationBuilder().token(TOKEN).build()
+db = get_db_connection()
+cursor = db.cursor()
 
-# ------------------- توابع بات -------------------
-
-# حالت‌ها برای تعامل کاربر
+# User states
 STATES = {
     'AWAITING_EMAIL': 1,
     'AWAITING_PASSWORD': 2,
@@ -62,45 +38,61 @@ STATES = {
     'AWAITING_PHONE': 5
 }
 
-# هش کردن رمز عبور
+# Helper functions
+def refresh_db_connection():
+    global db, cursor
+    if db.is_connected():
+        db.close()
+    db = get_db_connection()
+    cursor = db.cursor()
+
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
     return hashed.decode('utf-8')
 
-# بررسی تطابق رمز عبور
 def check_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
-# فرمت قیمت
 def format_price(price):
     return "{:,}".format(int(price))
 
-# شروع فرآیند login/register
+# Telegram bot handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("ورود / ثبت‌نام", callback_data='menu_login')],
+        [InlineKeyboardButton("دسته‌بندی محصولات", callback_data='menu_categories')],
+        [InlineKeyboardButton("جستجوی محصول", callback_data='menu_search')],
+        [InlineKeyboardButton("سبد خرید", callback_data='menu_cart')],
+        [InlineKeyboardButton("سفارش‌ها", callback_data='menu_orders')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "به ربات فروشگاه خوش آمدید!\nیکی از گزینه‌های زیر را انتخاب کنید:",
+        reply_markup=reply_markup
+    )
+
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("ورود", callback_data='login')],
-        [InlineKeyboardButton("ثبت‌نام", callback_data='register')]
+        [InlineKeyboardButton("ثبت‌ نام", callback_data='register')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("لطفا انتخاب کنید:", reply_markup=reply_markup)
+    await update.message.reply_text('لطفا انتخاب کنید:', reply_markup=reply_markup)
 
-# کلیک روی دکمه‌های ورود یا ثبت‌نام
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == 'login':
-        await query.message.reply_text('لطفا نام کاربری خود را وارد کنید:')
+        await query.message.reply_text('لطفا ایمیل خود را وارد کنید:')
         context.user_data['state'] = STATES['AWAITING_EMAIL']
         context.user_data['action'] = 'login'
-
     elif query.data == 'register':
         await query.message.reply_text('لطفا نام خود را وارد کنید:')
         context.user_data['state'] = STATES['AWAITING_FIRST_NAME']
         context.user_data['action'] = 'register'
 
-# پردازش پیام‌های متنی کاربر
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state = context.user_data.get('state')
     user_action = context.user_data.get('action')
@@ -111,10 +103,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['email'] = text
             await update.message.reply_text('لطفا رمز عبور خود را وارد کنید:')
             context.user_data['state'] = STATES['AWAITING_PASSWORD']
-
+        
         elif user_state == STATES['AWAITING_PASSWORD']:
+            context.user_data['password'] = text
             email = context.user_data['email']
-            password = text
+            password = context.user_data['password']
+
             cursor.execute("SELECT password FROM users WHERE email = %s", (email,))
             result = cursor.fetchone()
 
@@ -124,7 +118,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data['user_email'] = email
             else:
                 await update.message.reply_text('❌ ایمیل یا رمز عبور اشتباه است!')
-
             context.user_data.pop('state', None)
             context.user_data.pop('action', None)
             context.user_data.pop('password', None)
@@ -135,22 +128,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['first_name'] = text
             await update.message.reply_text('لطفا نام خانوادگی خود را وارد کنید:')
             context.user_data['state'] = STATES['AWAITING_LAST_NAME']
-
+        
         elif user_state == STATES['AWAITING_LAST_NAME']:
             context.user_data['last_name'] = text
             await update.message.reply_text('لطفا ایمیل خود را وارد کنید:')
             context.user_data['state'] = STATES['AWAITING_EMAIL']
-
+        
         elif user_state == STATES['AWAITING_EMAIL']:
             context.user_data['email'] = text
             await update.message.reply_text('لطفا رمز عبور خود را وارد کنید:')
             context.user_data['state'] = STATES['AWAITING_PASSWORD']
-
+        
         elif user_state == STATES['AWAITING_PASSWORD']:
             context.user_data['password'] = text
             await update.message.reply_text('لطفا شماره تلفن خود را وارد کنید:')
             context.user_data['state'] = STATES['AWAITING_PHONE']
-
+        
         elif user_state == STATES['AWAITING_PHONE']:
             context.user_data['phone'] = text
             first_name = context.user_data['first_name']
@@ -166,13 +159,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 db.commit()
                 await update.message.reply_text('✅ ثبت‌نام موفقیت‌آمیز بود!')
-            except Exception as e:
-                logger.error(f"Registration error: {e}")
-                await update.message.reply_text('❌ خطا در ثبت‌نام! لطفا بعداً تلاش کنید.')
-            
+            except mysql.connector.Error as err:
+                await update.message.reply_text(f'❌ خطا در ثبت‌نام: {err}')
             context.user_data.clear()
 
-# نمایش دسته‌بندی محصولات
 async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         cursor.execute("SELECT id, category_name FROM categories")
@@ -189,14 +179,13 @@ async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 buttons.append(row)
 
             reply_markup = InlineKeyboardMarkup(buttons)
-            await update.message.reply_text("📚 لطفاً یک دسته‌بندی را انتخاب کن:", reply_markup=reply_markup)
+            await update.message.reply_text("📚 لطفاً یک دسته‌بندی را انتخاب کنید:", reply_markup=reply_markup)
         else:
             await update.message.reply_text("❌ هیچ دسته‌ای پیدا نشد.")
-    except Exception as e:
-        logger.error(f"Categories error: {e}")
-        await update.message.reply_text("❌ خطا در دریافت دسته‌بندی‌ها")
+    except mysql.connector.Error as err:
+        await update.message.reply_text(f"❌ خطا در دریافت دسته‌بندی‌ها: {err}")
+        refresh_db_connection()
 
-# نمایش محصولات
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -207,8 +196,7 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['product_offset'] = 0
         await send_product_page(update, context, page=0)
     except Exception as e:
-        logger.error(f"Show products error: {e}")
-        await query.message.reply_text("❌ خطا در نمایش محصولات")
+        await query.message.reply_text(f"❌ خطا در نمایش محصولات: {e}")
 
 async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
     try:
@@ -231,10 +219,10 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             prod_id, name, desc, image_path, price, discount, quntity = product
             final_price = int(price * (1 - discount / 100))
             caption = (
-                f"🛍 {name}\n📄 {desc}\n💰 قیمت اصلی: {format_price(price)} تومان\n"
+                f"🛍 نام محصول: {name}\n📄مشخصات: {desc}\n💰 قیمت اصلی: {format_price(price)} تومان\n"
                 f"🎯 تخفیف: {discount}%\n💵 قیمت نهایی: {format_price(final_price)} تومان\n"
             )
-
+            
             if quntity == 0:
                 caption += "❌ موجودی نداره"
                 product_buttons = InlineKeyboardMarkup([
@@ -243,18 +231,20 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             else:
                 product_buttons = InlineKeyboardMarkup([
                     [
-                        InlineKeyboardButton("⭐ علاقه‌مندی", callback_data=f"bookmark_{prod_id}"),
+                        InlineKeyboardButton("⭐ افزودن به علاقه‌مندی‌ها", callback_data=f"bookmark_{prod_id}"),
                         InlineKeyboardButton("🛒 افزودن به سبد خرید", callback_data=f"addcart_{prod_id}")
                     ]
                 ])
 
-            image_full_path = os.path.join("public", image_path)
             try:
-                with open(image_full_path, 'rb') as img:
-                    await update.effective_chat.send_photo(photo=img, caption=caption, reply_markup=product_buttons)
-            except FileNotFoundError:
-                await update.effective_chat.send_message(f"🚫 تصویر {image_path} پیدا نشد.", reply_markup=product_buttons)
-
+                if image_path.startswith('http'):
+                    await update.effective_chat.send_photo(photo=image_path, caption=caption, reply_markup=product_buttons)
+                else:
+                    with open(f"public/{image_path}", 'rb') as img:
+                        await update.effective_chat.send_photo(photo=img, caption=caption, reply_markup=product_buttons)
+            except Exception as e:
+                await update.effective_chat.send_message(f"🚫 خطا در نمایش تصویر: {e}\n{caption}", reply_markup=product_buttons)
+        
         cursor.execute("SELECT COUNT(*) FROM products WHERE category_id = %s", (category_id,))
         total_products = cursor.fetchone()[0]
         current_page_count = offset + len(products)
@@ -269,35 +259,29 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             reply_markup = InlineKeyboardMarkup([nav_buttons])
             await update.effective_chat.send_message("📦 صفحه محصولات:", reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Product page error: {e}")
-        await update.effective_chat.send_message("❌ خطا در نمایش محصولات")
+        await update.effective_chat.send_message(f"❌ خطا در نمایش محصولات: {e}")
+        refresh_db_connection()
 
-# هندلر صفحه‌بندی
 async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    try:
-        page = context.user_data.get('product_offset', 0)
-        if query.data == "next_page":
-            page += 1
-        elif query.data == "prev_page" and page > 0:
-            page -= 1
+    page = context.user_data.get('product_offset', 0)
+    if query.data == "next_page":
+        page += 1
+    elif query.data == "prev_page" and page > 0:
+        page -= 1
 
-        context.user_data['product_offset'] = page
-        await send_product_page(update, context, page)
-    except Exception as e:
-        logger.error(f"Pagination error: {e}")
-        await query.message.reply_text("❌ خطا در تغییر صفحه")
+    context.user_data['product_offset'] = page
+    await send_product_page(update, context, page)
 
-# جستجوی محصول
 async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ لطفاً یک عبارت برای جستجو وارد کنید.\nمثال: `/search گوشی`")
+        await update.message.reply_text("❌ لطفاً یک عبارت برای جستجو وارد کنید.\nمثال: `/search مادربرد`")
         return
 
     try:
-        search_query = f"%{' '.join(context.args)}%"
+        search_query = "%{}%".format(" ".join(context.args))
 
         cursor.execute("""
             SELECT id, name, brand, description, image_path, price, discount 
@@ -317,211 +301,220 @@ async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_price = int(price * (1 - discount / 100))
             caption = (
                 f"🛍 {name} ({brand})\n📄 {desc}\n💰 قیمت: {format_price(price)} تومان\n"
-                f"🎯 تخفیف: {discount}%\n✅ نهایی: {format_price(final_price)} تومان"
+                f"🎯 تخفیف: {discount}%\n✅ قیمت نهایی: {format_price(final_price)} تومان"
             )
-            image_full_path = f"public/{image_path}"
 
             buttons = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("⭐ علاقه‌مندی", callback_data=f"bookmark_{prod_id}"),
-                    InlineKeyboardButton("🛒 افزودن به سبد", callback_data=f"addcart_{prod_id}")
+                    InlineKeyboardButton("⭐ افزودن به علاقه‌مندی‌ها", callback_data=f"bookmark_{prod_id}"),
+                    InlineKeyboardButton("🛒 افزودن به سبد خرید", callback_data=f"addcart_{prod_id}")
                 ]
             ])
 
             try:
-                with open(image_full_path, 'rb') as img:
-                    await update.message.reply_photo(photo=img, caption=caption, reply_markup=buttons)
-            except FileNotFoundError:
-                await update.message.reply_text(f"{name}\n🚫 تصویر یافت نشد.", reply_markup=buttons)
+                if image_path.startswith('http'):
+                    await update.message.reply_photo(photo=image_path, caption=caption, reply_markup=buttons)
+                else:
+                    with open(f"public/{image_path}", 'rb') as img:
+                        await update.message.reply_photo(photo=img, caption=caption, reply_markup=buttons)
+            except Exception as e:
+                await update.message.reply_text(f"🚫 خطا در نمایش تصویر: {e}\n{caption}", reply_markup=buttons)
     except Exception as e:
-        logger.error(f"Search error: {e}")
-        await update.message.reply_text("❌ خطا در جستجو")
+        await update.message.reply_text(f"❌ خطا در جستجو: {e}")
+        refresh_db_connection()
 
-# افزودن به علاقه‌مندی‌ها
 async def add_bookmark_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
+    if not context.user_data.get('logged_in'):
+        await query.message.reply_text("❗ برای افزودن به علاقه‌مندی‌ها باید ابتدا وارد شوید.")
+        return
+
     try:
         prod_id = int(query.data.replace("bookmark_", ""))
-
-        if not context.user_data.get('logged_in'):
-            await query.message.reply_text("❗ ابتدا وارد شوید.")
-            return
-
-        email = context.user_data['user_email']
+        email = context.user_data.get('user_email')
         cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         user = cursor.fetchone()
         if not user:
             await query.message.reply_text("❗ کاربر یافت نشد.")
             return
-
         user_id = user[0]
+
         cursor.execute("SELECT 1 FROM bookmarks WHERE user_id = %s AND product_id = %s", (user_id, prod_id))
         if cursor.fetchone():
-            await query.message.reply_text("⭐ قبلاً به علاقه‌مندی افزوده شده.")
-        else:
-            cursor.execute("INSERT INTO bookmarks (user_id, product_id) VALUES (%s, %s)", (user_id, prod_id))
-            db.commit()
-            await query.message.reply_text("✅ به علاقه‌مندی‌ها افزوده شد.")
-    except Exception as e:
-        logger.error(f"Bookmark error: {e}")
-        await query.message.reply_text("❌ خطا در افزودن به علاقه‌مندی‌ها")
+            await query.message.reply_text("⭐ این محصول قبلاً به علاقه‌مندی‌های شما افزوده شده است.")
+            return
 
-# مدیریت سبد خرید
+        cursor.execute("INSERT INTO bookmarks (user_id, product_id) VALUES (%s, %s)", (user_id, prod_id))
+        db.commit()
+        await query.message.reply_text("⭐ محصول به علاقه‌مندی‌های شما افزوده شد.")
+    except Exception as e:
+        await query.message.reply_text(f"❌ خطا در افزودن به علاقه‌مندی‌ها: {e}")
+        refresh_db_connection()
+
 async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    try:
-        prod_id = int(query.data.replace("addcart_", ""))
 
-        if not context.user_data.get('logged_in'):
-            await query.message.reply_text("❗ ابتدا وارد شوید.")
-            return
-
-        cart = context.user_data.get('cart', {})
-        cart[prod_id] = cart.get(prod_id, 0) + 1
-        context.user_data['cart'] = cart
-        await query.message.reply_text("🛒 به سبد خرید افزوده شد.")
-    except Exception as e:
-        logger.error(f"Add to cart error: {e}")
-        await query.message.reply_text("❌ خطا در افزودن به سبد خرید")
-
-async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
-        await update.message.reply_text("❗ برای مشاهده سبد خرید وارد شوید.")
+        await query.message.reply_text("❗ برای افزودن به سبد خرید باید ابتدا وارد شوید.")
         return
 
     try:
+        prod_id = int(query.data.replace("addcart_", ""))
         cart = context.user_data.get('cart', {})
-        if not cart:
-            await update.message.reply_text("🛒 سبد خرید شما خالی است.")
-            return
+        cart[prod_id] = cart.get(prod_id, 0) + 1
+        context.user_data['cart'] = cart
+        await query.message.reply_text("🛒 محصول به سبد خرید شما افزوده شد.")
+    except Exception as e:
+        await query.message.reply_text(f"❌ خطا در افزودن به سبد خرید: {e}")
 
+async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('logged_in'):
+        await update.message.reply_text("❗ برای مشاهده سبد خرید باید ابتدا وارد شوید.")
+        return
+
+    cart = context.user_data.get('cart', {})
+    if not cart:
+        await update.message.reply_text("🛒 سبد خرید شما خالی است.")
+        return
+
+    try:
         total = 0
-        for prod_id, qty in cart.items():
+        for prod_id, quantity in cart.items():
             cursor.execute("SELECT name, price, discount, image_path FROM products WHERE id = %s", (prod_id,))
             row = cursor.fetchone()
             if not row:
                 continue
             name, price, discount, image_path = row
             final_price = int(price * (1 - discount / 100))
-            subtotal = final_price * qty
-            total += subtotal
-
+            line_total = final_price * quantity
+            total += line_total
             caption = (
-                f"🛍 {name}\n"
-                f"تعداد: {qty}\n"
+                f"🛒 {name}\n"
+                f"تعداد: {quantity}\n"
                 f"قیمت واحد: {format_price(final_price)} تومان\n"
-                f"جمع: {format_price(subtotal)} تومان"
+                f"جمع: {format_price(line_total)} تومان"
             )
+            
+            remove_button = InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ حذف", callback_data=f"remove_cart_{prod_id}")]
+            ])
 
             try:
-                with open(f"public/{image_path}", "rb") as img:
-                    await update.message.reply_photo(photo=img, caption=caption)
-            except:
-                await update.message.reply_text(caption + "\n🚫 تصویر یافت نشد.")
+                if image_path.startswith('http'):
+                    await update.message.reply_photo(photo=image_path, caption=caption, reply_markup=remove_button)
+                else:
+                    with open(f"public/{image_path}", 'rb') as img:
+                        await update.message.reply_photo(photo=img, caption=caption, reply_markup=remove_button)
+            except Exception as e:
+                await update.message.reply_text(f"{caption}\n🚫 خطا در نمایش تصویر: {e}", reply_markup=remove_button)
 
-        buttons = [
-            [InlineKeyboardButton("💳 پرداخت", callback_data="pay_cart")],
-            [InlineKeyboardButton("🗑 خالی کردن سبد", callback_data="clear_cart")]
-        ]
-        pay_button = InlineKeyboardMarkup(buttons)
-        await update.message.reply_text(f"💵 مجموع کل: {format_price(total)} تومان", reply_markup=pay_button)
+        pay_button = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 پرداخت", callback_data="pay_cart")]
+        ])
+        await update.message.reply_text(f"\n💵 مجموع کل: {format_price(total)} تومان", reply_markup=pay_button)
     except Exception as e:
-        logger.error(f"Show cart error: {e}")
-        await update.message.reply_text("❌ خطا در نمایش سبد خرید")
+        await update.message.reply_text(f"❌ خطا در نمایش سبد خرید: {e}")
+        refresh_db_connection()
 
-async def clear_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    try:
-        if 'cart' in context.user_data:
-            del context.user_data['cart']
-        await query.message.reply_text("✅ سبد خرید خالی شد.")
-    except Exception as e:
-        logger.error(f"Clear cart error: {e}")
-        await query.message.reply_text("❌ خطا در خالی کردن سبد خرید")
 
-# پرداخت
+    if not context.user_data.get('logged_in'):
+        await query.message.reply_text("❗ برای حذف از سبد خرید باید ابتدا وارد شوید.")
+        return
+
+    try:
+        prod_id = int(query.data.replace("remove_cart_", ""))
+        cart = context.user_data.get('cart', {})
+        if prod_id in cart:
+            cart.pop(prod_id)
+            context.user_data['cart'] = cart
+            await query.message.reply_text("✅ محصول از سبد خرید حذف شد.")
+        else:
+            await query.message.reply_text("❗ این محصول در سبد خرید شما نیست.")
+        await show_cart(update, context)
+    except Exception as e:
+        await query.message.reply_text(f"❌ خطا در حذف از سبد خرید: {e}")
+
 async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if not context.user_data.get('logged_in'):
-        await query.message.reply_text("❗ ابتدا وارد شوید.")
+        await query.message.reply_text("❗ برای پرداخت باید ابتدا وارد شوید.")
+        return
+
+    cart = context.user_data.get('cart', {})
+    if not cart:
+        await query.message.reply_text("🛒 سبد خرید شما خالی است.")
         return
 
     try:
-        cart = context.user_data.get('cart', {})
-        if not cart:
-            await query.message.reply_text("🛒 سبد خرید خالی است.")
-            return
-
-        email = context.user_data['user_email']
-        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
-        user = cursor.fetchone()
-        if not user:
-            await query.message.reply_text("❌ خطا در شناسایی کاربر.")
-            return
-        user_id = user[0]
-
         products = []
         subtotal = 0
-        for prod_id, qty in cart.items():
-            cursor.execute("SELECT price, discount FROM products WHERE id = %s", (prod_id,))
-            p = cursor.fetchone()
-            if not p: continue
-            price, discount = p
+        email = context.user_data.get('user_email')
+
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+        user_result = cursor.fetchone()
+        if not user_result:
+            await query.message.reply_text("❌ خطا در دریافت اطلاعات کاربر!")
+            return
+        user_id = user_result[0]
+
+        for prod_id, quantity in cart.items():
+            cursor.execute("SELECT id, price, discount FROM products WHERE id = %s", (prod_id,))
+            product_data = cursor.fetchone()
+            if not product_data:
+                continue
+
+            product_id, price, discount = product_data
             final_price = int(price * (1 - discount / 100))
-            subtotal += final_price * qty
+            subtotal += final_price * quantity
+
             products.append({
-                "product_id": prod_id,
+                "product_id": product_id,
                 "price": int(price),
                 "discount": int(discount),
-                "quantity": qty
+                "quantity": quantity
             })
 
-        response = requests.post(
-            "https://hamidstore.liara.run/payment",
-            headers={'Content-Type': 'application/json'},
-            json={
-                "user_id": user_id,
-                "subtotal": int(subtotal),
-                "products": products
-            }
-        )
+        payment_data = {
+            "user_id": user_id,
+            "subtotal": int(subtotal),
+            "products": products,
+            "chat_id": query.message.chat_id,
+        }
 
-        if response.status_code == 200:
-            try:
-                res_json = response.json()
-                logger.info(f"📦 پاسخ سرور پرداخت: {res_json}")
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(PAYMENT_SERVICE_URL, json=payment_data, headers=headers)
+        response_data = response.json()
 
-                payment_url = res_json.get("payment_url")
-                if payment_url:
-                    button = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔗 مشاهده صفحه پرداخت", url=payment_url)]
-                    ])
-                    await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=button)
-                else:
-                    await query.message.reply_text("❌ لینک پرداخت یافت نشد.\n⚠️ لطفاً با مدیر تماس بگیرید.")
-            except Exception as e:
-                logger.error(f"❌ خطا در parse پاسخ: {e}")
-                await query.message.reply_text("❌ خطا در تحلیل پاسخ سرور پرداخت.")
+        if response.status_code == 200 and response_data.get('success'):
+            payment_url = response_data.get('payment_url')
+            keyboard = [[InlineKeyboardButton("🔗 رفتن به صفحه پرداخت", url=payment_url)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            if 'cart' in context.user_data:
+                del context.user_data['cart']
+            
+            await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
         else:
-            logger.warning(f"⛔ پاسخ ناموفق سرور با status code: {response.status_code}")
-            await query.message.reply_text(f"❌ خطا در اتصال به سرور پرداخت.\nوضعیت: {response.status_code}")
+            error_msg = response_data.get('error', 'خطای ناشناخته')
+            await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت! {error_msg}")
     except Exception as e:
-        logger.error(f"Payment error: {e}")
-        await query.message.reply_text(f"❌ خطا در پرداخت:\n{str(e)}")
-# سفارش‌ها
+        await query.message.reply_text(f"❌ خطا در ارتباط با سرور پرداخت: {str(e)}")
+    finally:
+        refresh_db_connection()
+
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
-        await update.message.reply_text("❗ ابتدا وارد شوید.")
+        await update.message.reply_text("❗ برای مشاهده سفارش‌ها باید ابتدا وارد شوید.")
         return
-
+    
     context.user_data['orders_page'] = 0
     await send_orders_page(update, context, page=0)
 
@@ -538,7 +531,7 @@ async def send_orders_page(update, context, page: int):
         cursor.execute("SELECT id, status, created_at FROM orders WHERE user_id = %s ORDER BY id DESC", (user_id,))
         orders = cursor.fetchall()
         if not orders:
-            await update.message.reply_text("📦 هیچ سفارشی ثبت نشده.")
+            await update.message.reply_text("📦 شما هیچ سفارشی ثبت نکرده‌اید.")
             return
 
         page_size = 4
@@ -546,21 +539,27 @@ async def send_orders_page(update, context, page: int):
         end = start + page_size
         orders_page = orders[start:end]
 
+        if not orders_page:
+            if hasattr(update, "callback_query") and update.callback_query:
+                await update.callback_query.message.reply_text("📦 سفارش بیشتری وجود ندارد.")
+            else:
+                await update.message.reply_text("📦 سفارش بیشتری وجود ندارد.")
+            return
+
         status_map = {
             "processing": "در حال پردازش",
-            "shipped": "ارسال شده",
-            "delivered": "تحویل‌شده",
+            "shipped": "در حال ارسال",
+            "delivered": "تحویل داده شده",
             "returned": "مرجوع شده"
         }
 
         for order_id, status, created_at in orders_page:
-            status_fa = status_map.get(str(status).lower(), status)
-            if isinstance(created_at, str):
-                created_at = datetime.fromisoformat(created_at)
-            created_jalali = jdatetime.datetime.fromgregorian(datetime=created_at).strftime("%Y/%m/%d ساعت %H:%M")
-
-            msg = f"🧾 سفارش #{order_id}\nتاریخ ثبت: {created_jalali}\nوضعیت: {status_fa}\n"
-
+            status_fa = status_map.get(str(status).lower(), str(status))
+            msg = (
+                f"🧾 سفارش شماره: {order_id}\n"
+                f"تاریخ ثبت: {created_at}\n"
+                f"وضعیت: {status_fa}\n"
+            )
             cursor.execute("""
                 SELECT od.product_id, od.quantity, od.price, p.name, p.image_path
                 FROM order_details od
@@ -568,203 +567,145 @@ async def send_orders_page(update, context, page: int):
                 WHERE od.order_id = %s
             """, (order_id,))
             details = cursor.fetchall()
+            if not details:
+                msg += "بدون محصول.\n"
+                await update.effective_chat.send_message(msg)
+                continue
+
             total = 0
-            lines = []
-            images = []
+            product_lines = []
+            image_ids = []
+            for prod_id, qty, price, name, image_path in details:
+                line_total = price * qty
+                total += line_total
+                product_lines.append(
+                    f"🔸 {name}\n"
+                    f"تعداد: {qty}\n"
+                    f"قیمت واحد: {format_price(price)} تومان\n"
+                    f"جمع: {format_price(line_total)} تومان\n"
+                )
+                image_ids.append({"prod_id": prod_id, "name": name, "image_path": image_path})
+            msg += "\n".join(product_lines)
+            msg += f"\n💵 جمع کل سفارش: {format_price(total)} تومان"
 
-            for pid, qty, price, name, img in details:
-                total += price * qty
-                lines.append(f"🔸 {name}\nتعداد: {qty}\nقیمت: {format_price(price)}\nجمع: {format_price(price * qty)}")
-                images.append({"prod_id": pid, "name": name, "image_path": img})
-
-            msg += "\n" + "\n".join(lines) + f"\n💰 مجموع کل: {format_price(total)} تومان"
-            button = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📷 تصاویر محصولات", callback_data=f"orderimgs_{order_id}")]
+            images_button = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📷 نمایش تصاویر محصولات", callback_data=f"orderimgs_{order_id}")]
             ])
-            context.user_data.setdefault('order_images', {})[str(order_id)] = images
-            await update.effective_chat.send_message(msg, reply_markup=button)
+            await update.effective_chat.send_message(msg, reply_markup=images_button)
 
-        nav_btns = []
+            if 'order_images' not in context.user_data:
+                context.user_data['order_images'] = {}
+            context.user_data['order_images'][str(order_id)] = image_ids
+
+        nav_buttons = []
         if end < len(orders):
-            nav_btns.append(InlineKeyboardButton("بعدی ⏩", callback_data="orders_next_page"))
+            nav_buttons.append(InlineKeyboardButton("بعدی ⏩", callback_data="orders_next_page"))
         if page > 0:
-            nav_btns.append(InlineKeyboardButton("⏪ قبلی", callback_data="orders_prev_page"))
-        if nav_btns:
-            await update.effective_chat.send_message("📑 صفحه سفارش‌ها:", reply_markup=InlineKeyboardMarkup([nav_btns]))
+            nav_buttons.append(InlineKeyboardButton("⏪ قبلی", callback_data="orders_prev_page"))
+        if nav_buttons:
+            reply_markup = InlineKeyboardMarkup([nav_buttons])
+            await update.effective_chat.send_message("صفحه سفارش‌ها:", reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Orders page error: {e}")
-        await update.effective_chat.send_message("❌ خطا در نمایش سفارش‌ها")
+        await update.effective_chat.send_message(f"❌ خطا در نمایش سفارش‌ها: {e}")
+        refresh_db_connection()
 
 async def orders_pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    try:
-        page = context.user_data.get('orders_page', 0)
-        if query.data == "orders_next_page":
-            page += 1
-        elif query.data == "orders_prev_page" and page > 0:
-            page -= 1
-        context.user_data['orders_page'] = page
-        await send_orders_page(update, context, page)
-    except Exception as e:
-        logger.error(f"Orders pagination error: {e}")
-        await query.message.reply_text("❌ خطا در تغییر صفحه سفارش‌ها")
+    page = context.user_data.get('orders_page', 0)
+    if query.data == "orders_next_page":
+        page += 1
+    elif query.data == "orders_prev_page" and page > 0:
+        page -= 1
+    context.user_data['orders_page'] = page
+    await send_orders_page(update, context, page)
 
 async def order_images_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     try:
         _, order_id = query.data.split("_")
-        order_images = context.user_data.get('order_images', {})
-        images = order_images.get(str(order_id))
-        if not images:
-            await query.message.reply_text("❌ تصویر محصولات سفارش یافت نشد.")
+        order_images = context.user_data.get('order_images', {}).get(order_id)
+        if not order_images:
+            await query.message.reply_text("تصاویر محصولات این سفارش موجود نیست.")
             return
 
-        for item in images:
+        for item in order_images:
             name = item["name"]
             image_path = item["image_path"]
-            image_full_path = f"public/{image_path}"
             try:
-                with open(image_full_path, 'rb') as img:
-                    await query.message.reply_photo(photo=img, caption=name)
-            except:
-                await query.message.reply_text(f"{name}\n🚫 تصویر یافت نشد.")
+                if image_path.startswith('http'):
+                    await query.message.reply_photo(photo=image_path, caption=name)
+                else:
+                    with open(f"public/{image_path}", 'rb') as img:
+                        await query.message.reply_photo(photo=img, caption=name)
+            except Exception as e:
+                await query.message.reply_text(f"{name}\n🚫 خطا در نمایش تصویر: {e}")
     except Exception as e:
-        logger.error(f"Order images error: {e}")
-        await query.message.reply_text("❌ خطا در نمایش تصاویر سفارش")
+        await query.message.reply_text(f"❌ خطا در نمایش تصاویر: {e}")
 
-# منوی شروع
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("ورود / ثبت‌نام", callback_data='menu_login')],
-        [InlineKeyboardButton("دسته‌بندی محصولات", callback_data='menu_categories')],
-        [InlineKeyboardButton("جستجوی محصول", callback_data='menu_search')],
-        [InlineKeyboardButton("سبد خرید", callback_data='menu_cart')],
-        [InlineKeyboardButton("سفارش‌ها", callback_data='menu_orders')],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎉 به فروشگاه خوش اومدی! یکی از گزینه‌ها رو انتخاب کن:", reply_markup=reply_markup)
-
-# هندلر دکمه‌های منو
 async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    fake_update = Update(update.update_id, message=query.message)
     if data == 'menu_login':
+        fake_update = Update(update.update_id, message=query.message)
         await login(fake_update, context)
     elif data == 'menu_categories':
+        fake_update = Update(update.update_id, message=query.message)
         await categories_command(fake_update, context)
     elif data == 'menu_search':
-        await query.message.reply_text("🔍 دستور جستجو:\n`/search گوشی`")
+        await query.message.reply_text("برای جستجو، دستور زیر را ارسال کنید:\n/search [عبارت مورد نظر]")
     elif data == 'menu_cart':
-        await show_cart(fake_update, context)
+        class DummyMessage:
+            def __init__(self, chat, from_user):
+                self.chat = chat
+                self.from_user = from_user
+            async def reply_text(self, *args, **kwargs):
+                await query.message.reply_text(*args, **kwargs)
+            async def reply_photo(self, *args, **kwargs):
+                await query.message.reply_photo(*args, **kwargs)
+        dummy_update = Update(
+            update.update_id,
+            message=DummyMessage(query.message.chat, query.from_user)
+        )
+        await show_cart(dummy_update, context)
     elif data == 'menu_orders':
-        await show_orders(fake_update, context)
+        class DummyMessage:
+            def __init__(self, chat, from_user):
+                self.chat = chat
+                self.from_user = from_user
+            async def reply_text(self, *args, **kwargs):
+                await query.message.reply_text(*args, **kwargs)
+        dummy_update = Update(
+            update.update_id,
+            message=DummyMessage(query.message.chat, query.from_user)
+        )
+        await show_orders(dummy_update, context)
 
-# ✳️ ساخت Flask اپ
-flask_app = Flask(__name__)
+# Initialize bot
+app = ApplicationBuilder().token(TOKEN).build()
 
-@flask_app.route('/')
-def home():
-    return "✅ Bot is running."
+# Add handlers
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(start_menu_handler, pattern="^menu_"))
+app.add_handler(CommandHandler("login", login))
+app.add_handler(CommandHandler("categories", categories_command))
+app.add_handler(CallbackQueryHandler(show_products, pattern="^categoryid_"))
+app.add_handler(CallbackQueryHandler(pagination_handler, pattern="^(next_page|prev_page)$"))
+app.add_handler(CommandHandler("search", search_products))
+app.add_handler(CallbackQueryHandler(add_bookmark_handler, pattern="^bookmark_"))
+app.add_handler(CallbackQueryHandler(add_to_cart_handler, pattern="^addcart_"))
+app.add_handler(CommandHandler("cart", show_cart))
+app.add_handler(CallbackQueryHandler(pay_cart_handler, pattern="^pay_cart$"))
+app.add_handler(CallbackQueryHandler(remove_from_cart_handler, pattern="^remove_cart_"))
+app.add_handler(CommandHandler("orders", show_orders))
+app.add_handler(CallbackQueryHandler(orders_pagination_handler, pattern="^orders_(next_page|prev_page)$"))
+app.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"))
+app.add_handler(CallbackQueryHandler(button_click))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-@flask_app.route(f'/{TOKEN}', methods=["POST"])
-async def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        await application.update_queue.put(update)
-        return "ok"
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return "error", 500
-
-@flask_app.route('/webhook-status')
-def webhook_status():
-    try:
-        webhook_info = application.bot.get_webhook_info()
-        return json.dumps(webhook_info.to_dict(), indent=2)
-    except Exception as e:
-        return f"Error getting webhook info: {str(e)}", 500
-
-@flask_app.route('/health')
-def health_check():
-    return "OK", 200
-
-
-
-async def set_webhook():
-    if RENDER_URL:
-        webhook_url = f"{RENDER_URL}/{TOKEN}"
-        try:
-            await application.bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook set to: {webhook_url}")
-        except Exception as e:
-            logger.error(f"Error setting webhook: {e}")
-    else:
-        logger.warning("RENDER_URL not set. Skipping webhook setup.")
-
-async def run_bot():
-    await application.initialize()
-    await application.start()
-    await set_webhook()
-    
-    try:
-        while True:
-            await asyncio.sleep(1)
-    except asyncio.CancelledError:
-        await application.stop()
-        await application.shutdown()
-
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-async def main():
-    # Run bot and Flask in separate threads
-    loop = asyncio.get_event_loop()
-    
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    bot_task = loop.create_task(run_bot())
-    
-    try:
-        await bot_task
-    except KeyboardInterrupt:
-        pass
-    finally:
-        await application.stop()
-        await application.shutdown()
-
-# ⏬ راه‌اندازی نهایی ربات و تعریف تمام هندلرها
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(start_menu_handler, pattern="^menu_"))
-application.add_handler(CommandHandler("login", login))
-application.add_handler(CommandHandler("categories", categories_command))
-application.add_handler(CommandHandler("search", search_products))
-application.add_handler(CommandHandler("cart", show_cart))
-application.add_handler(CommandHandler("orders", show_orders))
-
-application.add_handler(CallbackQueryHandler(show_products, pattern="^categoryid_"))
-application.add_handler(CallbackQueryHandler(pagination_handler, pattern="^(next_page|prev_page)$"))
-application.add_handler(CallbackQueryHandler(add_bookmark_handler, pattern="^bookmark_"))
-application.add_handler(CallbackQueryHandler(add_to_cart_handler, pattern="^addcart_"))
-application.add_handler(CallbackQueryHandler(clear_cart_handler, pattern="^clear_cart$"))
-application.add_handler(CallbackQueryHandler(pay_cart_handler, pattern="^pay_cart$"))
-
-application.add_handler(CallbackQueryHandler(orders_pagination_handler, pattern="^orders_(next_page|prev_page)$"))
-application.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"))
-application.add_handler(CallbackQueryHandler(button_click))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        logger.error(f"Main error: {e}")
+# Run bot
+if __name__ == "__main__":
+    app.run_polling()

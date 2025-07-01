@@ -1,7 +1,5 @@
-python-telegram-bot==22.0
-flask[async]
+python-telegram-bot==20.3
 mysql-connector-python
 bcrypt
 requests
-jdatetime
 python-dotenv
