@@ -695,6 +695,25 @@ def webhook_status():
 def health_check():
     return "OK", 200
 
+@flask_app.route('/payment', methods=["POST"])
+def handle_payment_request():
+    try:
+        data = request.get_json(force=True)
+        logger.info(f"📥 دریافت درخواست پرداخت: {data}")
+
+        user_id = data.get("user_id")
+        subtotal = data.get("subtotal")
+
+        if not user_id or not subtotal:
+            return {"success": False, "message": "Missing data"}, 400
+
+        # شبیه‌سازی لینک پرداخت
+        payment_url = f"https://example.com/pay/{user_id}-{subtotal}"
+        return {"payment_url": payment_url}
+    except Exception as e:
+        logger.error(f"❌ خطا در پردازش پرداخت: {e}")
+        return {"success": False, "message": str(e)}, 500
+
 async def set_webhook():
     if RENDER_URL:
         webhook_url = f"{RENDER_URL}/{TOKEN}"
