@@ -719,7 +719,7 @@ if __name__ == "__main__":
             listen="0.0.0.0",
             port=PORT,
             url_path=TOKEN,
-            webhook_url=f"https://your-service-name.onrender.com/{TOKEN}"
+            webhook_url=f"https://telegram-shop-bot-ghak.onrender.com/{TOKEN}"
         )
     else:
         # برای توسعه محلی از polling استفاده می‌کنیم
