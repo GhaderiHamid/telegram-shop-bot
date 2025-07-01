@@ -503,7 +503,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         
         response = requests.post(
-            "https://hamidstore.liara.run/payment",
+            "https://hamidstore.liara.run/api/payment",
             json=payment_data,
             headers=headers
         )
