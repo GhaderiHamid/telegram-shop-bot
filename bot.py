@@ -685,6 +685,10 @@ async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             message=DummyMessage(query.message.chat, query.from_user)
         )
         await show_orders(dummy_update, context)
+import os
+from telegram.ext import ApplicationBuilder
+
+PORT = int(os.environ.get('PORT', 8443))  # پورت پیش‌فرض 8443 برای webhook
 
 # Initialize bot
 app = ApplicationBuilder().token(TOKEN).build()
@@ -710,4 +714,14 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 # Run bot
 if __name__ == "__main__":
-    app.run_polling()
+    # در Render از webhook استفاده می‌کنیم
+    if os.environ.get('RENDER'):
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TOKEN,
+            webhook_url=f"https://your-service-name.onrender.com/{TOKEN}"
+        )
+    else:
+        # برای توسعه محلی از polling استفاده می‌کنیم
+        app.run_polling()
