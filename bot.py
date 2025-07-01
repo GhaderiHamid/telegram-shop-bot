@@ -443,66 +443,94 @@ async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT
         await query.message.reply_text(f"❌ خطا در حذف از سبد خرید: {e}")
 
 
-PAYMENT_SERVICE_URL = "https://hamidstore.liara.run/payment"
-
 async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    try:
-        # فرض می‌کنیم cart و email قبلاً ذخیره شده‌اند
-        cart = context.user_data.get('cart', {})
-        email = context.user_data.get('user_email')
+    if not context.user_data.get('logged_in'):
+        await query.message.reply_text("❗ برای پرداخت باید ابتدا وارد شوید.")
+        return
 
-        # دریافت user_id از دیتابیس
-        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
-        user_result = cursor.fetchone()
-        user_id = user_result[0] if user_result else None
+    cart = context.user_data.get('cart', {})
+    if not cart:
+        await query.message.reply_text("🛒 سبد خرید شما خالی است.")
+        return
 
-        # جمع‌آوری محصولات و محاسبه subtotal
-        products = []
-        subtotal = 0
-
-        for prod_id, quantity in cart.items():
-            cursor.execute("SELECT id, price, discount FROM products WHERE id = %s", (prod_id,))
-            product_data = cursor.fetchone()
-            if not product_data:
-                continue
-
-            product_id, price, discount = product_data
-            final_price = int(price * (1 - discount / 100))
-            subtotal += final_price * quantity
-
-            products.append({
-                "product_id": product_id,
-                "price": int(price),
-                "discount": int(discount),
-                "quantity": quantity
-            })
-
-        # ساخت دیتا برای ارسال
-        payment_data = {
-            "user_id": user_id,
-            "subtotal": subtotal,
-            "products": products,
-            "chat_id": query.message.chat_id
-        }
-
-        # ارسال POST request به سرور
-        headers = {'Content-Type': 'application/json'}
-        requests.post(PAYMENT_SERVICE_URL, json=payment_data, headers=headers)
-
-        # ساخت و ارسال دکمه پرداخت برای کاربر
-        keyboard = [[InlineKeyboardButton("🔗 رفتن به صفحه پرداخت", url=PAYMENT_SERVICE_URL)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
-
-    except Exception as e:
-        await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت: {str(e)}")
     
-    finally:
-        refresh_db_connection()
+    products = []
+    subtotal = 0
+    email = context.user_data.get('user_email')
+
+    
+    cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+    user_result = cursor.fetchone()
+    if not user_result:
+        await query.message.reply_text("❌ خطا در دریافت اطلاعات کاربر!")
+        return
+
+    user_id = user_result[0]
+
+    for prod_id, quantity in cart.items():
+        cursor.execute("SELECT id, price, discount FROM products WHERE id = %s", (prod_id,))
+        product_data = cursor.fetchone()
+        if not product_data:
+            continue
+
+        product_id, price, discount = product_data
+        final_price = int(price * (1 - discount / 100))
+        subtotal += final_price * quantity
+
+        products.append({
+            "product_id": product_id,
+            "price": int(price),
+            "discount": int(discount),
+            "quantity": quantity
+        })
+    chat_id = query.message.chat_id
+    # ساخت داده‌های JSON
+    payment_data = {
+        "user_id": user_id,
+        "subtotal": int(subtotal),
+        "products": products,
+        "chat_id": chat_id,
+    }
+
+    try:
+       
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
+        response = requests.post(
+            "https://hamidstore.liara.run/payment",
+            json=payment_data,
+            headers=headers
+        )
+        
+        response_data = response.json()
+        
+        if response.status_code == 200 and response_data.get('success'):
+            payment_url = response_data.get('payment_url')
+            keyboard = [
+                [InlineKeyboardButton("🔗 رفتن به صفحه پرداخت", url=payment_url)]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+           
+            
+            if 'cart' in context.user_data:
+                del context.user_data['cart']
+                
+            
+            await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
+        else:
+            error_msg = response_data.get('error', 'خطای ناشناخته')
+            await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت! {error_msg}")
+        
+    except Exception as e:
+        await query.message.reply_text(f"❌ خطا در ارتباط با سرور پرداخت: {str(e)}")
+    refresh_db_connection()
+
 
 
 
