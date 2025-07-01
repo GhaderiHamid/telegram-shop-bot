@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import bcrypt
 import requests
+import jdatetime
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -548,95 +549,100 @@ async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_orders_page(update, context, page=0)
 
 async def send_orders_page(update, context, page: int):
-    try:
-        email = context.user_data.get('user_email')
-        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
-        user = cursor.fetchone()
-        if not user:
-            await update.message.reply_text("❌ کاربر یافت نشد.")
-            return
-        user_id = user[0]
+    email = context.user_data.get('user_email')
+    cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+    user = cursor.fetchone()
+    if not user:
+        await update.message.reply_text("❌ کاربر یافت نشد.")
+        return
+    user_id = user[0]
 
-        cursor.execute("SELECT id, status, created_at FROM orders WHERE user_id = %s ORDER BY id DESC", (user_id,))
-        orders = cursor.fetchall()
-        if not orders:
-            await update.message.reply_text("📦 شما هیچ سفارشی ثبت نکرده‌اید.")
-            return
+    cursor.execute("SELECT id, status, created_at FROM orders WHERE user_id = %s ORDER BY id DESC", (user_id,))
+    orders = cursor.fetchall()
+    if not orders:
+        await update.message.reply_text("📦 شما هیچ سفارشی ثبت نکرده‌اید.")
+        return
 
-        page_size = 4
-        start = page * page_size
-        end = start + page_size
-        orders_page = orders[start:end]
+    page_size = 4
+    start = page * page_size
+    end = start + page_size
+    orders_page = orders[start:end]
 
-        if not orders_page:
-            if hasattr(update, "callback_query") and update.callback_query:
-                await update.callback_query.message.reply_text("📦 سفارش بیشتری وجود ندارد.")
-            else:
-                await update.message.reply_text("📦 سفارش بیشتری وجود ندارد.")
-            return
+    if not orders_page:
+        if hasattr(update, "callback_query") and update.callback_query:
+            await update.callback_query.message.reply_text("📦 سفارش بیشتری وجود ندارد.")
+        else:
+            await update.message.reply_text("📦 سفارش بیشتری وجود ندارد.")
+        return
 
-        status_map = {
-            "processing": "در حال پردازش",
-            "shipped": "در حال ارسال",
-            "delivered": "تحویل داده شده",
-            "returned": "مرجوع شده"
-        }
+    status_map = {
+        "processing": "در حال پردازش",
+        "shipped": "در حال ارسال",
+        "delivered": "تحویل داده شده",
+        "returned": "مرجوع شده",
+        "return_requested": "درخواست بازگشت",
+        "return_in_progress":  "درحال بازگشت",
+        "returned": "مرجوع شده",
+        "return_rejected": "رد درخواست مرجوعی",
+    }
 
-        for order_id, status, created_at in orders_page:
-            status_fa = status_map.get(str(status).lower(), str(status))
-            msg = (
-                f"🧾 سفارش شماره: {order_id}\n"
-                f"تاریخ ثبت: {created_at}\n"
-                f"وضعیت: {status_fa}\n"
+    for order_id, status, created_at in orders_page:
+        status_fa = status_map.get(str(status).lower(), str(status))
+        shamsi_date = jdatetime.date.fromgregorian(date=created_at.date()).strftime('%Y/%m/%d')
+        msg = (
+            f"🧾 سفارش شماره: {order_id}\n"
+            f"تاریخ ثبت: {shamsi_date}\n"
+            f"وضعیت: {status_fa}\n"
+        )
+        cursor.execute("""
+            SELECT od.product_id, od.quantity, od.price, p.name, p.image_path
+            FROM order_details od
+            JOIN products p ON od.product_id = p.id
+            WHERE od.order_id = %s
+        """, (order_id,))
+        details = cursor.fetchall()
+        if not details:
+            msg += "بدون محصول.\n"
+            await update.effective_chat.send_message(msg)
+            continue
+
+        total = 0
+        product_lines = []
+        image_ids = []
+        for prod_id, qty, price, name, image_path in details:
+            line_total = price * qty
+            total += line_total
+            product_lines.append(
+                f"🔸 {name}\n"
+                f"تعداد: {qty}\n"
+                f"قیمت واحد: {format_price(price)} تومان\n"
+                f"جمع: {format_price(line_total)} تومان\n"
             )
-            cursor.execute("""
-                SELECT od.product_id, od.quantity, od.price, p.name, p.image_path
-                FROM order_details od
-                JOIN products p ON od.product_id = p.id
-                WHERE od.order_id = %s
-            """, (order_id,))
-            details = cursor.fetchall()
-            if not details:
-                msg += "بدون محصول.\n"
-                await update.effective_chat.send_message(msg)
-                continue
+            
+            image_ids.append({"prod_id": prod_id, "name": name, "image_path": image_path})
+        msg += "\n".join(product_lines)
+        msg += f"\n💵 جمع کل سفارش: {format_price(total)} تومان"
 
-            total = 0
-            product_lines = []
-            image_ids = []
-            for prod_id, qty, price, name, image_path in details:
-                line_total = price * qty
-                total += line_total
-                product_lines.append(
-                    f"🔸 {name}\n"
-                    f"تعداد: {qty}\n"
-                    f"قیمت واحد: {format_price(price)} تومان\n"
-                    f"جمع: {format_price(line_total)} تومان\n"
-                )
-                image_ids.append({"prod_id": prod_id, "name": name, "image_path": image_path})
-            msg += "\n".join(product_lines)
-            msg += f"\n💵 جمع کل سفارش: {format_price(total)} تومان"
+       
+        images_button = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📷 نمایش تصاویر محصولات", callback_data=f"orderimgs_{order_id}")]
+        ])
+        await update.effective_chat.send_message(msg, reply_markup=images_button)
 
-            images_button = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📷 نمایش تصاویر محصولات", callback_data=f"orderimgs_{order_id}")]
-            ])
-            await update.effective_chat.send_message(msg, reply_markup=images_button)
+        
+        if 'order_images' not in context.user_data:
+            context.user_data['order_images'] = {}
+       
+        context.user_data['order_images'][str(order_id)] = image_ids
 
-            if 'order_images' not in context.user_data:
-                context.user_data['order_images'] = {}
-            context.user_data['order_images'][str(order_id)] = image_ids
-
-        nav_buttons = []
-        if end < len(orders):
-            nav_buttons.append(InlineKeyboardButton("بعدی ⏩", callback_data="orders_next_page"))
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton("⏪ قبلی", callback_data="orders_prev_page"))
-        if nav_buttons:
-            reply_markup = InlineKeyboardMarkup([nav_buttons])
-            await update.effective_chat.send_message("صفحه سفارش‌ها:", reply_markup=reply_markup)
-    except Exception as e:
-        await update.effective_chat.send_message(f"❌ خطا در نمایش سفارش‌ها: {e}")
-        refresh_db_connection()
+    nav_buttons = []
+    if end < len(orders):
+        nav_buttons.append(InlineKeyboardButton("بعدی ⏩", callback_data="orders_next_page"))
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⏪ قبلی", callback_data="orders_prev_page"))
+    if nav_buttons:
+        reply_markup = InlineKeyboardMarkup([nav_buttons])
+        await update.effective_chat.send_message("صفحه سفارش‌ها:", reply_markup=reply_markup)
 
 async def orders_pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
