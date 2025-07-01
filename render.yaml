@@ -1,7 +1,10 @@
 services:
   - type: web
-    name: your-bot-service
+    name: telegram-shop-bot  # این نام به طور خودکار در متغیر RENDER_SERVICE_NAME قرار می‌گیرد
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
-    port: 8443  # باید با پورتی که در کد تعیین کردید مطابقت داشته باشد
+    port: 8443
+    envVars:
+      - key: https://telegram-shop-bot-ghak.onrender.com
+        value: telegram-shop-bot  # همان نام سرویس

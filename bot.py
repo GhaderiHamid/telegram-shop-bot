@@ -712,14 +712,18 @@ app.add_handler(CallbackQueryHandler(button_click))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 # Run bot
+# Run bot
 if __name__ == "__main__":
     # در Render از webhook استفاده می‌کنیم
     if os.environ.get('RENDER'):
+        # تنظیمات webhook
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
             url_path=TOKEN,
-            webhook_url=f"https://telegram-shop-bot-ghak.onrender.com/{TOKEN}"
+            webhook_url=f"https://{os.environ.get('RENDER_SERVICE_NAME')}.onrender.com/{TOKEN}",
+            cert=None,  # برای توسعه، نیاز به SSL نداریم
+            drop_pending_updates=True
         )
     else:
         # برای توسعه محلی از polling استفاده می‌کنیم
