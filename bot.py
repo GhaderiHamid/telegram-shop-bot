@@ -437,19 +437,21 @@ async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT
         if prod_id in cart:
             cart.pop(prod_id)
             context.user_data['cart'] = cart
-            await query.message.reply_text("✅ محصول از سبد خرید حذف شد.")
+            success = True
         else:
             await query.message.reply_text("❗ این محصول در سبد خرید شما نیست.")
+            success = False
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در حذف از سبد خرید: {e}")
         return
 
-    # نمایش سبد خرید، جدا از try اصلی:
-    try:
-        await show_cart(update, context)
-    except Exception as e:
-        await query.message.reply_text(f"⚠️ خطا در نمایش سبد خرید: {e}")
-
+    if success:
+        try:
+            await query.message.reply_text("✅ محصول از سبد خرید حذف شد.")
+            await show_cart(update, context)
+        except Exception as e:
+            await query.message.reply_text("✅ محصول از سبد خرید حذف شد.")
+            await query.message.reply_text(f"⚠️ خطا در نمایش سبد خرید: {e}")
 
 
 async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
