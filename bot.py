@@ -367,11 +367,29 @@ async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         prod_id = int(query.data.replace("addcart_", ""))
         cart = context.user_data.get('cart', {})
-        cart[prod_id] = cart.get(prod_id, 0) + 1
+        current_quantity = cart.get(prod_id, 0)
+
+        # گرفتن محدودیت خرید از دیتابیس
+        cursor.execute("SELECT limited FROM products WHERE id = %s", (prod_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            await query.message.reply_text("❗ محصول یافت نشد.")
+            return
+
+        limit = result[0]
+        if limit is not None and current_quantity + 1 > limit:
+            await query.message.reply_text(f"🚫 حداکثر تعداد مجاز برای این محصول: {limit} عدد است.")
+            return
+
+        # افزودن به سبد خرید
+        cart[prod_id] = current_quantity + 1
         context.user_data['cart'] = cart
         await query.message.reply_text("🛒 محصول به سبد خرید شما افزوده شد.")
+
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در افزودن به سبد خرید: {e}")
+
 
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
