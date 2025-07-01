@@ -25,40 +25,33 @@ DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_NAME = os.environ["DB_NAME"]
 RENDER_URL = os.environ["RENDER_URL"]
-IMAGE_BASE_URL = os.environ.get("IMAGE_BASE_URL", "")
-PAYMENT_API_URL = os.environ.get("PAYMENT_API_URL", "https://hamidstore.liara.run/payment")
 
 # تنظیم لاگر
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('bot.log')
-    ]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 # اتصال به دیتابیس
-def get_db_connection():
-    try:
-        db = mysql.connector.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            database=DB_NAME
-        )
-        return db
-    except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        raise
-
-db = get_db_connection()
-cursor = db.cursor()
+try:
+    db = mysql.connector.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME
+    )
+    cursor = db.cursor()
+    logger.info("✅ Connected to database successfully")
+except Exception as e:
+    logger.error(f"❌ Database connection failed: {e}")
+    raise
 
 # اپلیکیشن تلگرام
 application = ApplicationBuilder().token(TOKEN).build()
+
+# ------------------- توابع بات -------------------
 
 # حالت‌ها برای تعامل کاربر
 STATES = {
@@ -69,55 +62,21 @@ STATES = {
     'AWAITING_PHONE': 5
 }
 
-# ------------------- توابع کمکی -------------------
-
+# هش کردن رمز عبور
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
     return hashed.decode('utf-8')
 
+# بررسی تطابق رمز عبور
 def check_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
+# فرمت قیمت
 def format_price(price):
     return "{:,}".format(int(price))
 
-async def send_product_image(update, image_path, caption, reply_markup=None):
-    """ارسال تصویر محصول با مدیریت خطاها"""
-    try:
-        if IMAGE_BASE_URL:
-            # استفاده از URL برای تصاویر
-            image_url = f"{IMAGE_BASE_URL}/{image_path}"
-            await update.effective_chat.send_photo(
-                photo=image_url,
-                caption=caption,
-                reply_markup=reply_markup
-            )
-        else:
-            # استفاده از فایل محلی
-            image_full_path = os.path.join(os.getcwd(), "public", image_path)
-            if os.path.exists(image_full_path):
-                with open(image_full_path, 'rb') as img:
-                    await update.effective_chat.send_photo(
-                        photo=img,
-                        caption=caption,
-                        reply_markup=reply_markup
-                    )
-            else:
-                logger.error(f"Image file not found: {image_full_path}")
-                await update.effective_chat.send_message(
-                    caption,
-                    reply_markup=reply_markup
-                )
-    except Exception as e:
-        logger.error(f"Error sending product image: {e}")
-        await update.effective_chat.send_message(
-            caption,
-            reply_markup=reply_markup
-        )
-
-# ------------------- توابع اصلی بات -------------------
-
+# شروع فرآیند login/register
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("ورود", callback_data='login')],
@@ -126,12 +85,13 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("لطفا انتخاب کنید:", reply_markup=reply_markup)
 
+# کلیک روی دکمه‌های ورود یا ثبت‌نام
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == 'login':
-        await query.message.reply_text('لطفا ایمیل خود را وارد کنید:')
+        await query.message.reply_text('لطفا نام کاربری خود را وارد کنید:')
         context.user_data['state'] = STATES['AWAITING_EMAIL']
         context.user_data['action'] = 'login'
 
@@ -140,6 +100,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['state'] = STATES['AWAITING_FIRST_NAME']
         context.user_data['action'] = 'register'
 
+# پردازش پیام‌های متنی کاربر
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state = context.user_data.get('state')
     user_action = context.user_data.get('action')
@@ -211,15 +172,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data.clear()
 
+# نمایش دسته‌بندی محصولات
 async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         cursor.execute("SELECT id, category_name FROM categories")
         results = cursor.fetchall()
 
         if results:
-            buttons = []
-            for cat_id, name in results:
-                buttons.append([InlineKeyboardButton(name, callback_data=f"categoryid_{cat_id}")])
+            buttons, row = [], []
+            for i, (cat_id, name) in enumerate(results, 1):
+                row.append(InlineKeyboardButton(name, callback_data=f"categoryid_{cat_id}"))
+                if i % 4 == 0:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
 
             reply_markup = InlineKeyboardMarkup(buttons)
             await update.message.reply_text("📚 لطفاً یک دسته‌بندی را انتخاب کن:", reply_markup=reply_markup)
@@ -229,6 +196,7 @@ async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Categories error: {e}")
         await update.message.reply_text("❌ خطا در دریافت دسته‌بندی‌ها")
 
+# نمایش محصولات
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -248,7 +216,7 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         offset = page * 4
 
         cursor.execute("""
-            SELECT id, name, description, image_path, price, discount, quantity 
+            SELECT id, name, description, image_path, price, discount, quntity 
             FROM products 
             WHERE category_id = %s 
             LIMIT 4 OFFSET %s
@@ -260,14 +228,14 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             return
 
         for product in products:
-            prod_id, name, desc, image_path, price, discount, quantity = product
+            prod_id, name, desc, image_path, price, discount, quntity = product
             final_price = int(price * (1 - discount / 100))
             caption = (
                 f"🛍 {name}\n📄 {desc}\n💰 قیمت اصلی: {format_price(price)} تومان\n"
                 f"🎯 تخفیف: {discount}%\n💵 قیمت نهایی: {format_price(final_price)} تومان\n"
             )
 
-            if quantity == 0:
+            if quntity == 0:
                 caption += "❌ موجودی نداره"
                 product_buttons = InlineKeyboardMarkup([
                     [InlineKeyboardButton("⭐ افزودن به علاقه‌مندی‌ها", callback_data=f"bookmark_{prod_id}")]
@@ -280,7 +248,12 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                     ]
                 ])
 
-            await send_product_image(update, image_path, caption, product_buttons)
+            image_full_path = os.path.join("public", image_path)
+            try:
+                with open(image_full_path, 'rb') as img:
+                    await update.effective_chat.send_photo(photo=img, caption=caption, reply_markup=product_buttons)
+            except FileNotFoundError:
+                await update.effective_chat.send_message(f"🚫 تصویر {image_path} پیدا نشد.", reply_markup=product_buttons)
 
         cursor.execute("SELECT COUNT(*) FROM products WHERE category_id = %s", (category_id,))
         total_products = cursor.fetchone()[0]
@@ -299,6 +272,7 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         logger.error(f"Product page error: {e}")
         await update.effective_chat.send_message("❌ خطا در نمایش محصولات")
 
+# هندلر صفحه‌بندی
 async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -316,6 +290,7 @@ async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Pagination error: {e}")
         await query.message.reply_text("❌ خطا در تغییر صفحه")
 
+# جستجوی محصول
 async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("❌ لطفاً یک عبارت برای جستجو وارد کنید.\nمثال: `/search گوشی`")
@@ -344,6 +319,7 @@ async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🛍 {name} ({brand})\n📄 {desc}\n💰 قیمت: {format_price(price)} تومان\n"
                 f"🎯 تخفیف: {discount}%\n✅ نهایی: {format_price(final_price)} تومان"
             )
+            image_full_path = f"public/{image_path}"
 
             buttons = InlineKeyboardMarkup([
                 [
@@ -352,11 +328,16 @@ async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ])
 
-            await send_product_image(update, image_path, caption, buttons)
+            try:
+                with open(image_full_path, 'rb') as img:
+                    await update.message.reply_photo(photo=img, caption=caption, reply_markup=buttons)
+            except FileNotFoundError:
+                await update.message.reply_text(f"{name}\n🚫 تصویر یافت نشد.", reply_markup=buttons)
     except Exception as e:
         logger.error(f"Search error: {e}")
         await update.message.reply_text("❌ خطا در جستجو")
 
+# افزودن به علاقه‌مندی‌ها
 async def add_bookmark_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -387,6 +368,7 @@ async def add_bookmark_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Bookmark error: {e}")
         await query.message.reply_text("❌ خطا در افزودن به علاقه‌مندی‌ها")
 
+# مدیریت سبد خرید
 async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -436,7 +418,8 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             try:
-                await send_product_image(update, image_path, caption)
+                with open(f"public/{image_path}", "rb") as img:
+                    await update.message.reply_photo(photo=img, caption=caption)
             except:
                 await update.message.reply_text(caption + "\n🚫 تصویر یافت نشد.")
 
@@ -462,155 +445,78 @@ async def clear_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Clear cart error: {e}")
         await query.message.reply_text("❌ خطا در خالی کردن سبد خرید")
 
+# پرداخت
 async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # 1. بررسی لاگین بودن کاربر
     if not context.user_data.get('logged_in'):
-        await query.message.reply_text("❗ لطفاً ابتدا وارد حساب کاربری خود شوید.")
+        await query.message.reply_text("❗ ابتدا وارد شوید.")
         return
 
     try:
-        # 2. بررسی سبد خرید
         cart = context.user_data.get('cart', {})
         if not cart:
-            await query.message.reply_text("🛒 سبد خرید شما خالی است.")
+            await query.message.reply_text("🛒 سبد خرید خالی است.")
             return
 
-        # 3. دریافت اطلاعات کاربر از دیتابیس
         email = context.user_data['user_email']
-        cursor.execute("SELECT id, first_name, phone FROM users WHERE email = %s", (email,))
-        user_data = cursor.fetchone()
-        
-        if not user_data:
-            await query.message.reply_text("❌ اطلاعات کاربر یافت نشد.")
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        if not user:
+            await query.message.reply_text("❌ خطا در شناسایی کاربر.")
             return
-            
-        user_id, first_name, phone = user_data
+        user_id = user[0]
 
-        # 4. محاسبه مبلغ کل و آماده‌سازی آیتم‌ها
-        order_items = []
-        total_amount = 0
-        
-        for product_id, quantity in cart.items():
-            cursor.execute(
-                "SELECT name, price, discount FROM products WHERE id = %s",
-                (product_id,)
-            )
-            product = cursor.fetchone()
-            
-            if not product:
-                continue
-                
-            name, price, discount = product
+        products = []
+        subtotal = 0
+        for prod_id, qty in cart.items():
+            cursor.execute("SELECT price, discount FROM products WHERE id = %s", (prod_id,))
+            p = cursor.fetchone()
+            if not p: continue
+            price, discount = p
             final_price = int(price * (1 - discount / 100))
-            item_total = final_price * quantity
-            total_amount += item_total
-            
-            order_items.append({
-                "id": product_id,
-                "name": name,
-                "price": price,
-                "discount": discount,
-                "quantity": quantity,
-                "total": item_total
+            subtotal += final_price * qty
+            products.append({
+                "product_id": prod_id,
+                "price": int(price),
+                "discount": int(discount),
+                "quantity": qty
             })
 
-        # 5. نمایش خلاصه فاکتور به کاربر
-        invoice_text = f"🧾 فاکتور خرید برای {first_name}\n\n"
-        for item in order_items:
-            invoice_text += (
-                f"▫️ {item['name']}\n"
-                f"  - تعداد: {item['quantity']}\n"
-                f"  - قیمت واحد: {format_price(item['price'])} تومان\n"
-                f"  - تخفیف: {item['discount']}%\n"
-                f"  - جمع: {format_price(item['total'])} تومان\n\n"
-            )
-        invoice_text += f"💰 مبلغ قابل پرداخت: {format_price(total_amount)} تومان"
-        
-        await query.message.reply_text(invoice_text)
-
-        # 6. آماده‌سازی درخواست پرداخت
-        payment_data = {
-            "user": {
-                "id": user_id,
-                "name": first_name,
-                "email": email,
-                "mobile": phone
-            },
-            "amount": total_amount,
-            "currency": "IRR",
-            "items": order_items,
-            "callback_url": f"{RENDER_URL}/payment/verify",
-            "metadata": {
-                "bot": True,
-                "source": "telegram_bot"
+        response = requests.post(
+            "https://hamidstore.liara.run/payment",
+            headers={'Content-Type': 'application/json'},
+            json={
+                "user_id": user_id,
+                "subtotal": int(subtotal),
+                "products": products
             }
-        }
+        )
 
-        # 7. ارسال درخواست پرداخت با کنترل کامل
-        try:
-            # استفاده از session برای مدیریت بهتر
-            with requests.Session() as session:
-                session.headers.update({
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'Authorization': f'Bearer {TOKEN[:10]}...'  # برای امنیت
-                })
-                
-                # لاگ قبل از ارسال
-                logger.info(f"Payment request to {PAYMENT_API_URL}")
-                logger.debug(f"Request payload: {json.dumps(payment_data, indent=2)}")
-                
-                response = session.post(
-                    PAYMENT_API_URL,
-                    json=payment_data,  # استفاده از json به جای data
-                    timeout=20,
-                    allow_redirects=False
-                )
-                
-                # پردازش پاسخ
-                response.raise_for_status()  # خطا برای وضعیت‌های 4xx/5xx
-                
-                result = response.json()
-                
-                if not result.get('success'):
-                    raise Exception(result.get('message', 'پرداخت ناموفق بود'))
-                
-                payment_url = result.get('payment_url')
-                if not payment_url:
-                    raise Exception("لینک پرداخت در پاسخ وجود ندارد")
-                
-                # 8. نمایش دکمه پرداخت به کاربر
-                keyboard = [
-                    [InlineKeyboardButton("💳 پرداخت آنلاین", url=payment_url)],
-                    [InlineKeyboardButton("✅ پرداخت انجام شد", callback_data="verify_payment")]
-                ]
-                await query.message.reply_text(
-                    "برای پرداخت آنلاین روی دکمه زیر کلیک کنید:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+        if response.status_code == 200:
+            try:
+                res_json = response.json()
+                logger.info(f"📦 پاسخ سرور پرداخت: {res_json}")
 
-        except requests.exceptions.HTTPError as http_err:
-            if http_err.response.status_code == 405:
-                raise Exception("سرور پرداخت متد POST را نمی‌پذیرد. لطفاً با پشتیبانی تماس بگیرید.")
-            raise Exception(f"خطای HTTP: {str(http_err)}")
-            
-        except Exception as e:
-            raise Exception(f"خطا در پرداخت: {str(e)}")
-
+                payment_url = res_json.get("payment_url")
+                if payment_url:
+                    button = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔗 مشاهده صفحه پرداخت", url=payment_url)]
+                    ])
+                    await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=button)
+                else:
+                    await query.message.reply_text("❌ لینک پرداخت یافت نشد.\n⚠️ لطفاً با مدیر تماس بگیرید.")
+            except Exception as e:
+                logger.error(f"❌ خطا در parse پاسخ: {e}")
+                await query.message.reply_text("❌ خطا در تحلیل پاسخ سرور پرداخت.")
+        else:
+            logger.warning(f"⛔ پاسخ ناموفق سرور با status code: {response.status_code}")
+            await query.message.reply_text(f"❌ خطا در اتصال به سرور پرداخت.\nوضعیت: {response.status_code}")
     except Exception as e:
-        logger.error(f"Payment failed: {str(e)}", exc_info=True)
-        error_msg = f"❌ خطا در پردازش پرداخت:\n{str(e)}"
-        
-        # کوتاه کردن پیام خطا اگر خیلی طولانی است
-        if len(error_msg) > 4000:
-            error_msg = "❌ خطا در انجام پرداخت. لطفاً دقایقی دیگر تلاش کنید."
-        
-        await query.message.reply_text(error_msg)
-
-
+        logger.error(f"Payment error: {e}")
+        await query.message.reply_text(f"❌ خطا در پرداخت:\n{str(e)}")
+# سفارش‌ها
 async def show_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
         await update.message.reply_text("❗ ابتدا وارد شوید.")
@@ -720,11 +626,17 @@ async def order_images_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         for item in images:
             name = item["name"]
             image_path = item["image_path"]
-            await send_product_image(update, image_path, name)
+            image_full_path = f"public/{image_path}"
+            try:
+                with open(image_full_path, 'rb') as img:
+                    await query.message.reply_photo(photo=img, caption=name)
+            except:
+                await query.message.reply_text(f"{name}\n🚫 تصویر یافت نشد.")
     except Exception as e:
         logger.error(f"Order images error: {e}")
         await query.message.reply_text("❌ خطا در نمایش تصاویر سفارش")
 
+# منوی شروع
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("ورود / ثبت‌نام", callback_data='menu_login')],
@@ -736,6 +648,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🎉 به فروشگاه خوش اومدی! یکی از گزینه‌ها رو انتخاب کن:", reply_markup=reply_markup)
 
+# هندلر دکمه‌های منو
 async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -753,8 +666,7 @@ async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == 'menu_orders':
         await show_orders(fake_update, context)
 
-# ------------------- Flask App -------------------
-
+# ✳️ ساخت Flask اپ
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -771,11 +683,17 @@ async def webhook():
         logger.error(f"Webhook error: {e}")
         return "error", 500
 
+@flask_app.route('/webhook-status')
+def webhook_status():
+    try:
+        webhook_info = application.bot.get_webhook_info()
+        return json.dumps(webhook_info.to_dict(), indent=2)
+    except Exception as e:
+        return f"Error getting webhook info: {str(e)}", 500
+
 @flask_app.route('/health')
 def health_check():
     return "OK", 200
-
-# ------------------- Main -------------------
 
 async def set_webhook():
     if RENDER_URL:
@@ -797,8 +715,6 @@ async def run_bot():
         while True:
             await asyncio.sleep(1)
     except asyncio.CancelledError:
-        pass
-    finally:
         await application.stop()
         await application.shutdown()
 
@@ -806,13 +722,23 @@ def run_flask():
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 async def main():
+    # Run bot and Flask in separate threads
+    loop = asyncio.get_event_loop()
+    
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
-    await run_bot()
+    bot_task = loop.create_task(run_bot())
+    
+    try:
+        await bot_task
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await application.stop()
+        await application.shutdown()
 
-# ------------------- Handlers -------------------
-
+# ⏬ راه‌اندازی نهایی ربات و تعریف تمام هندلرها
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(start_menu_handler, pattern="^menu_"))
 application.add_handler(CommandHandler("login", login))
@@ -839,4 +765,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"Main error: {e}")
