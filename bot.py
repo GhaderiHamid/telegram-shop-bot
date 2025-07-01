@@ -446,12 +446,10 @@ async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT
         return
 
     if success:
-        try:
+        
             await query.message.reply_text("✅ محصول از سبد خرید حذف شد.")
             await show_cart(update, context)
-        except Exception as e:
-            await query.message.reply_text("✅ محصول از سبد خرید حذف شد.")
-            await query.message.reply_text(f"⚠️ خطا در نمایش سبد خرید: {e}")
+        
 
 
 async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
