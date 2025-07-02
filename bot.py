@@ -546,7 +546,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "product_id": product_id,
             "price": int(price),
             "discount": int(discount),
-            "quantity": quantity
+            "quantity": int(quantity)
         })
     chat_id = query.message.chat_id
     # ساخت داده‌های JSON
