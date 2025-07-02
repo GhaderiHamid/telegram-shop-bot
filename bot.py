@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 import bcrypt
 import requests
 import jdatetime
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -356,6 +357,8 @@ async def add_bookmark_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text(f"❌ خطا در افزودن به علاقه‌مندی‌ها: {e}")
         refresh_db_connection()
 
+from datetime import datetime
+
 async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -365,11 +368,12 @@ async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     try:
+        # استخراج product_id از callback_data
         prod_id = int(query.data.replace("addcart_", ""))
         cart = context.user_data.get('cart', {})
         current_quantity = cart.get(prod_id, 0)
 
-        # گرفتن محدودیت خرید از دیتابیس
+        # گرفتن محدودیت از دیتابیس
         cursor.execute("SELECT limited FROM products WHERE id = %s", (prod_id,))
         result = cursor.fetchone()
 
@@ -383,13 +387,44 @@ async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         # افزودن به سبد خرید
-        cart[prod_id] = current_quantity + 1
+        new_quantity = current_quantity + 1
+        cart[prod_id] = new_quantity
         context.user_data['cart'] = cart
         await query.message.reply_text("🛒 محصول به سبد خرید شما افزوده شد.")
 
+        # رزرو محصول در جدول reservations
+        cursor.execute("SELECT id FROM users WHERE email = %s", (context.user_data.get('user_email'),))
+        user_row = cursor.fetchone()
+
+        if user_row:
+            user_id = user_row[0]
+            now = datetime.now()
+
+            # بررسی وجود رزرو قبلی
+            cursor.execute("""
+                SELECT id FROM reservations
+                WHERE user_id = %s AND product_id = %s
+            """, (user_id, prod_id))
+            existing = cursor.fetchone()
+
+            if existing:
+                # بروزرسانی رزرو قبلی
+                cursor.execute("""
+                    UPDATE reservations
+                    SET quantity = %s, reserved_at = %s
+                    WHERE user_id = %s AND product_id = %s
+                """, (new_quantity, now, user_id, prod_id))
+            else:
+                # درج رزرو جدید
+                cursor.execute("""
+                    INSERT INTO reservations (user_id, product_id, quantity, reserved_at)
+                    VALUES (%s, %s, %s, %s)
+                """, (user_id, prod_id, new_quantity, now))
+
+            db.commit()
+
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در افزودن به سبد خرید: {e}")
-
 
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
