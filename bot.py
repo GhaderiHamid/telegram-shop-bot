@@ -18,7 +18,7 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 DB_PORT=os.getenv("DB_PORT")
-PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "https://hamidstore.liara.run/payment")
+PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "https://pcstore.liara.run/payment")
 
 # Database connection
 def get_db_connection():
@@ -565,7 +565,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         
         response = requests.post(
-            "https://hamidstore.liara.run/api/payment",
+            "https://pcstore.liara.run/api/payment",
             json=payment_data,
             headers=headers
         )
