@@ -648,7 +648,7 @@ async def send_orders_page(update, context, page: int):
             f"وضعیت: {status_fa}\n"
         )
         cursor.execute("""
-            SELECT od.product_id, od.quantity, od.price, p.name, p.image_path
+            SELECT od.product_id,od.discount od.quantity, od.price, p.name, p.image_path
             FROM order_details od
             JOIN products p ON od.product_id = p.id
             WHERE od.order_id = %s
@@ -662,15 +662,28 @@ async def send_orders_page(update, context, page: int):
         total = 0
         product_lines = []
         image_ids = []
-        for prod_id, qty, price, name, image_path in details:
-            line_total = price * qty
+        for prod_id, qty, price, name, discount, image_path in details:
+            final_price = int(price * (1 - discount / 100))
+            line_total = final_price * qty
             total += line_total
-            product_lines.append(
-                f"🔸 {name}\n"
-                f"تعداد: {qty}\n"
-                f"قیمت واحد: {format_price(price)} تومان\n"
-                f"جمع: {format_price(line_total)} تومان\n"
+
+            product_text = (
+             f"🔸 {name}\n"
+             f"تعداد: {qty}\n"
+             f"قیمت واحد: {format_price(price)} تومان\n"
             )
+
+            if discount > 0:
+                product_text += (
+                    f"🔻 تخفیف: {discount}%\n"
+                    f"💸 قیمت با تخفیف: {format_price(final_price)} تومان\n"
+                )
+            else:
+                product_text += f"💸 قیمت نهایی: {format_price(final_price)} تومان\n"
+
+            product_text += f"جمع: {format_price(line_total)} تومان\n"
+
+            product_lines.append(product_text)
             
             image_ids.append({"prod_id": prod_id, "name": name, "image_path": image_path})
         msg += "\n".join(product_lines)
