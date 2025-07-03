@@ -634,8 +634,7 @@ async def send_orders_page(update, context, page: int):
         "delivered": "تحویل داده شده",
         "returned": "مرجوع شده",
         "return_requested": "درخواست بازگشت",
-        "return_in_progress":  "درحال بازگشت",
-        "returned": "مرجوع شده",
+        "return_in_progress": "درحال بازگشت",
         "return_rejected": "رد درخواست مرجوعی",
     }
 
@@ -647,13 +646,15 @@ async def send_orders_page(update, context, page: int):
             f"تاریخ ثبت: {shamsi_date}\n"
             f"وضعیت: {status_fa}\n"
         )
+
         cursor.execute("""
-            SELECT od.product_id,od.discount od.quantity, od.price, p.name, p.image_path
+            SELECT od.product_id, od.quantity, od.price, p.name, od.discount, p.image_path
             FROM order_details od
             JOIN products p ON od.product_id = p.id
             WHERE od.order_id = %s
         """, (order_id,))
         details = cursor.fetchall()
+
         if not details:
             msg += "بدون محصول.\n"
             await update.effective_chat.send_message(msg)
@@ -662,15 +663,16 @@ async def send_orders_page(update, context, page: int):
         total = 0
         product_lines = []
         image_ids = []
+
         for prod_id, qty, price, name, discount, image_path in details:
             final_price = int(price * (1 - discount / 100))
             line_total = final_price * qty
             total += line_total
 
             product_text = (
-             f"🔸 {name}\n"
-             f"تعداد: {qty}\n"
-             f"قیمت واحد: {format_price(price)} تومان\n"
+                f"🔸 {name}\n"
+                f"تعداد: {qty}\n"
+                f"قیمت واحد: {format_price(price)} تومان\n"
             )
 
             if discount > 0:
@@ -682,34 +684,33 @@ async def send_orders_page(update, context, page: int):
                 product_text += f"💸 قیمت نهایی: {format_price(final_price)} تومان\n"
 
             product_text += f"جمع: {format_price(line_total)} تومان\n"
-
             product_lines.append(product_text)
-            
+
             image_ids.append({"prod_id": prod_id, "name": name, "image_path": image_path})
+
         msg += "\n".join(product_lines)
         msg += f"\n💵 جمع کل سفارش: {format_price(total)} تومان"
 
-       
         images_button = InlineKeyboardMarkup([
             [InlineKeyboardButton("📷 نمایش تصاویر محصولات", callback_data=f"orderimgs_{order_id}")]
         ])
         await update.effective_chat.send_message(msg, reply_markup=images_button)
 
-        
         if 'order_images' not in context.user_data:
             context.user_data['order_images'] = {}
-       
+
         context.user_data['order_images'][str(order_id)] = image_ids
 
+    # ناوبری صفحه‌ها
     nav_buttons = []
     if end < len(orders):
         nav_buttons.append(InlineKeyboardButton("بعدی ⏩", callback_data="orders_next_page"))
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⏪ قبلی", callback_data="orders_prev_page"))
+
     if nav_buttons:
         reply_markup = InlineKeyboardMarkup([nav_buttons])
         await update.effective_chat.send_message("صفحه سفارش‌ها:", reply_markup=reply_markup)
-
 async def orders_pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
