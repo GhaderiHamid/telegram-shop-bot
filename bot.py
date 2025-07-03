@@ -164,7 +164,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.commit()
                 await update.message.reply_text('✅ ثبت‌نام موفقیت‌آمیز بود!')
             except mysql.connector.Error as err:
-                await update.message.reply_text(f'❌ خطا در ثبت‌نام: {err}')
+                await update.message.reply_text(f'❌ خطا در ثبت‌ نام')
             context.user_data.clear()
 
 async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -187,7 +187,7 @@ async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             await update.message.reply_text("❌ هیچ دسته‌ای پیدا نشد.")
     except mysql.connector.Error as err:
-        await update.message.reply_text(f"❌ خطا در دریافت دسته‌بندی‌ها: {err}")
+        await update.message.reply_text(f"❌ خطا در دریافت دسته‌بندی‌ها")
         refresh_db_connection()
 
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -200,7 +200,7 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['product_offset'] = 0
         await send_product_page(update, context, page=0)
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در نمایش محصولات: {e}")
+        await query.message.reply_text(f"❌ خطا در نمایش محصولات")
 
 async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
     try:
@@ -247,7 +247,7 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                     with open(f"public/{image_path}", 'rb') as img:
                         await update.effective_chat.send_photo(photo=img, caption=caption, reply_markup=product_buttons)
             except Exception as e:
-                await update.effective_chat.send_message(f"🚫 خطا در نمایش تصویر: {e}\n{caption}", reply_markup=product_buttons)
+                await update.effective_chat.send_message(f"🚫 خطا در نمایش تصویر\n{caption}", reply_markup=product_buttons)
         
         cursor.execute("SELECT COUNT(*) FROM products WHERE category_id = %s", (category_id,))
         total_products = cursor.fetchone()[0]
@@ -263,7 +263,7 @@ async def send_product_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             reply_markup = InlineKeyboardMarkup([nav_buttons])
             await update.effective_chat.send_message("📦 صفحه محصولات:", reply_markup=reply_markup)
     except Exception as e:
-        await update.effective_chat.send_message(f"❌ خطا در نمایش محصولات: {e}")
+        await update.effective_chat.send_message(f"❌ خطا در نمایش محصولات")
         refresh_db_connection()
 
 async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,9 +322,9 @@ async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(f"public/{image_path}", 'rb') as img:
                         await update.message.reply_photo(photo=img, caption=caption, reply_markup=buttons)
             except Exception as e:
-                await update.message.reply_text(f"🚫 خطا در نمایش تصویر: {e}\n{caption}", reply_markup=buttons)
+                await update.message.reply_text(f"🚫 خطا در نمایش تصویر\n{caption}", reply_markup=buttons)
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در جستجو: {e}")
+        await update.message.reply_text(f"❌ خطا در جستجو")
         refresh_db_connection()
 
 async def add_bookmark_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -354,7 +354,7 @@ async def add_bookmark_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         db.commit()
         await query.message.reply_text("⭐ محصول به علاقه‌مندی‌های شما افزوده شد.")
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در افزودن به علاقه‌مندی‌ها: {e}")
+        await query.message.reply_text(f"❌ خطا در افزودن به علاقه‌مندی‌ها")
         refresh_db_connection()
 
 from datetime import datetime
@@ -424,7 +424,7 @@ async def add_to_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             db.commit()
 
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در افزودن به سبد خرید: {e}")
+        await query.message.reply_text(f"❌ خطا در افزودن به سبد خرید")
 
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('logged_in'):
@@ -465,14 +465,14 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(f"public/{image_path}", 'rb') as img:
                         await update.message.reply_photo(photo=img, caption=caption, reply_markup=remove_button)
             except Exception as e:
-                await update.message.reply_text(f"{caption}\n🚫 خطا در نمایش تصویر: {e}", reply_markup=remove_button)
+                await update.message.reply_text(f"{caption}\n🚫 خطا در نمایش تصویر", reply_markup=remove_button)
 
         pay_button = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 پرداخت", callback_data="pay_cart")]
         ])
         await update.message.reply_text(f"\n💵 مجموع کل: {format_price(total)} تومان", reply_markup=pay_button)
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در نمایش سبد خرید: {e}")
+        await update.message.reply_text(f"❌ خطا در نمایش سبد خرید")
         refresh_db_connection()
 
 async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -495,7 +495,7 @@ async def remove_from_cart_handler(update: Update, context: ContextTypes.DEFAULT
             await query.message.reply_text("❗ این محصول در سبد خرید شما نیست.")
             success = False
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در حذف از سبد خرید: {e}")
+        await query.message.reply_text(f"❌ خطا در حذف از سبد خرید")
         return
 
     if success:
@@ -587,7 +587,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("برای پرداخت روی دکمه زیر کلیک کنید:", reply_markup=reply_markup)
         else:
             error_msg = response_data.get('error', 'خطای ناشناخته')
-            await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت! {error_msg}")
+            await query.message.reply_text(f"❌ خطا در ایجاد لینک پرداخت! ")
         
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در ارتباط با سرور پرداخت: {str(e)}")
@@ -741,9 +741,9 @@ async def order_images_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     with open(f"public/{image_path}", 'rb') as img:
                         await query.message.reply_photo(photo=img, caption=name)
             except Exception as e:
-                await query.message.reply_text(f"{name}\n🚫 خطا در نمایش تصویر: {e}")
+                await query.message.reply_text(f"{name}\n🚫 خطا در نمایش تصویر")
     except Exception as e:
-        await query.message.reply_text(f"❌ خطا در نمایش تصاویر: {e}")
+        await query.message.reply_text(f"❌ خطا در نمایش تصاویر")
 
 async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
