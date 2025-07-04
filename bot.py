@@ -753,7 +753,7 @@ async def order_images_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text(f"❌ خطا در نمایش تصاویر")
 
 import whisper
-from pydub import AudioSegment
+
 
 # بارگذاری مدل فقط یک‌بار
 whisper_model = whisper.load_model("base")
