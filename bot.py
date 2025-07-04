@@ -799,6 +799,13 @@ async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(f"🔎 جستجو با متن: {query_text}")
     await perform_search_from_text(update, context, query_text)
+    # 🧹 حذف فایل‌های موقت بعد از پایان پردازش
+    try:
+       os.remove(ogg_path)
+       os.remove(wav_path)
+    except Exception as cleanup_error:
+       print(f"⚠️ خطا در حذف فایل صوتی: {cleanup_error}")
+
 # تابع جستجو با متن (همون logic /search ولی بدون دستور)
 async def perform_search_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     try:
