@@ -746,6 +746,84 @@ async def order_images_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در نمایش تصاویر")
 
+import whisper
+from pydub import AudioSegment
+
+# بارگذاری مدل فقط یک‌بار
+whisper_model = whisper.load_model("base")
+
+async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    voice = update.message.voice
+    if not voice:
+        await update.message.reply_text("❌ خطا در دریافت voice")
+        return
+
+    # دانلود فایل صوتی
+    file = await context.bot.get_file(voice.file_id)
+    ogg_path = f"voices/{voice.file_unique_id}.ogg"
+    wav_path = ogg_path.replace(".ogg", ".wav")
+
+    os.makedirs("voices", exist_ok=True)
+    await file.download_to_drive(ogg_path)
+
+    # تبدیل به wav برای Whisper
+    try:
+        audio = AudioSegment.from_ogg(ogg_path)
+        audio.export(wav_path, format="wav")
+    except Exception as e:
+        await update.message.reply_text("❌ خطا در تبدیل فایل صوتی")
+        return
+
+    # پردازش با Whisper
+    try:
+        result = whisper_model.transcribe(wav_path)
+        query_text = result['text']
+        await update.message.reply_text(f"🔎 جستجو با متن: {query_text}")
+        await perform_search_from_text(update, context, query_text)
+    except Exception as e:
+        await update.message.reply_text("❌ خطا در پردازش صوتی")
+
+# تابع جستجو با متن (همون logic /search ولی بدون دستور)
+async def perform_search_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    try:
+        search_query = f"%{text}%"
+        cursor.execute("""
+            SELECT id, name, brand, description, image_path, price, discount 
+            FROM products 
+            WHERE name LIKE %s OR brand LIKE %s OR description LIKE %s 
+            LIMIT 5
+        """, (search_query, search_query, search_query))
+
+        products = cursor.fetchall()
+        if not products:
+            await update.message.reply_text("❌ محصولی یافت نشد.")
+            return
+
+        for product in products:
+            prod_id, name, brand, desc, image_path, price, discount = product
+            final_price = int(price * (1 - discount / 100))
+            caption = (
+                f"🛍 {name} ({brand})\n📄 {desc}\n💰 قیمت: {format_price(price)} تومان\n"
+                f"🎯 تخفیف: {discount}%\n✅ قیمت نهایی: {format_price(final_price)} تومان"
+            )
+
+            buttons = InlineKeyboardMarkup([[
+                InlineKeyboardButton("⭐ علاقه‌مندی", callback_data=f"bookmark_{prod_id}"),
+                InlineKeyboardButton("🛒 افزودن", callback_data=f"addcart_{prod_id}")
+            ]])
+
+            try:
+                if image_path.startswith('http'):
+                    await update.message.reply_photo(photo=image_path, caption=caption, reply_markup=buttons)
+                else:
+                    with open(f"public/{image_path}", 'rb') as img:
+                        await update.message.reply_photo(photo=img, caption=caption, reply_markup=buttons)
+            except:
+                await update.message.reply_text(caption, reply_markup=buttons)
+    except Exception as e:
+        await update.message.reply_text("❌ خطا در جستجوی صوتی")
+        refresh_db_connection()
+
 async def start_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -809,6 +887,7 @@ app.add_handler(CommandHandler("orders", show_orders))
 app.add_handler(CallbackQueryHandler(orders_pagination_handler, pattern="^orders_(next_page|prev_page)$"))
 app.add_handler(CallbackQueryHandler(order_images_handler, pattern="^orderimgs_"))
 app.add_handler(CallbackQueryHandler(button_click))
+app.add_handler(MessageHandler(filters.VOICE, handle_voice_search))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 # Run bot
