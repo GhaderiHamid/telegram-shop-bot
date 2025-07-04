@@ -61,6 +61,12 @@ def check_password(password: str, hashed_password: str) -> bool:
 def format_price(price):
     return "{:,}".format(int(price))
 
+import subprocess
+
+def convert_ogg_to_wav(ogg_path, wav_path):
+    cmd = ['ffmpeg', '-y', '-i', ogg_path, wav_path]
+    subprocess.run(cmd, check=True)
+
 # Telegram bot handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -768,8 +774,7 @@ async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # تبدیل به wav برای Whisper
     try:
-        audio = AudioSegment.from_ogg(ogg_path)
-        audio.export(wav_path, format="wav")
+        convert_ogg_to_wav(ogg_path, wav_path)
     except Exception as e:
         await update.message.reply_text("❌ خطا در تبدیل فایل صوتی")
         return
