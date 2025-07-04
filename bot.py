@@ -752,11 +752,26 @@ async def order_images_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در نمایش تصاویر")
 
-import whisper
+import assemblyai as aai
+import requests
 
+aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")  # کلید رو از env می‌گیری
 
-# بارگذاری مدل فقط یک‌بار
-whisper_model = whisper.load_model("base")
+def transcribe_with_assemblyai(wav_path):
+    try:
+        with open(wav_path, 'rb') as f:
+            upload_response = requests.post(
+                'https://api.assemblyai.com/v2/upload',
+                headers={'authorization': aai.settings.api_key},
+                data=f
+            )
+        audio_url = upload_response.json()['upload_url']
+
+        transcriber = aai.Transcriber()
+        transcript = transcriber.transcribe(audio_url)
+        return transcript.text
+    except Exception as e:
+        return None
 
 async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice = update.message.voice
@@ -764,7 +779,6 @@ async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ خطا در دریافت voice")
         return
 
-    # دانلود فایل صوتی
     file = await context.bot.get_file(voice.file_id)
     ogg_path = f"voices/{voice.file_unique_id}.ogg"
     wav_path = ogg_path.replace(".ogg", ".wav")
@@ -772,22 +786,19 @@ async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     os.makedirs("voices", exist_ok=True)
     await file.download_to_drive(ogg_path)
 
-    # تبدیل به wav برای Whisper
     try:
         convert_ogg_to_wav(ogg_path, wav_path)
-    except Exception as e:
+    except:
         await update.message.reply_text("❌ خطا در تبدیل فایل صوتی")
         return
 
-    # پردازش با Whisper
-    try:
-        result = whisper_model.transcribe(wav_path)
-        query_text = result['text']
-        await update.message.reply_text(f"🔎 جستجو با متن: {query_text}")
-        await perform_search_from_text(update, context, query_text)
-    except Exception as e:
-        await update.message.reply_text("❌ خطا در پردازش صوتی")
+    query_text = transcribe_with_assemblyai(wav_path)
+    if not query_text:
+        await update.message.reply_text("❌ خطا در پردازش صوتی از طریق API")
+        return
 
+    await update.message.reply_text(f"🔎 جستجو با متن: {query_text}")
+    await perform_search_from_text(update, context, query_text)
 # تابع جستجو با متن (همون logic /search ولی بدون دستور)
 async def perform_search_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     try:

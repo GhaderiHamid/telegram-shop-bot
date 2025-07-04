@@ -5,7 +5,7 @@ requests==2.31.0
 python-dotenv==1.0.0
 gunicorn==20.1.0
 jdatetime==5.2.0
-git+https://github.com/openai/whisper.git
 ffmpeg-python==0.2.0
+assemblyai==0.15.0
 setuptools==65.5.0
 wheel==0.40.0
