@@ -18,7 +18,7 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 DB_PORT=os.getenv("DB_PORT")
-PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "https://pcstore.liara.run/payment")
+PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "https://pcstore1.liara.run/payment")
 
 # Database connection
 def get_db_connection():
@@ -929,4 +929,5 @@ if __name__ == "__main__":
         )
     else:
         # برای توسعه محلی از polling استفاده می‌کنیم
+
         app.run_polling()
