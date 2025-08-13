@@ -571,7 +571,7 @@ async def pay_cart_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         
         response = requests.post(
-            "https://pcstore.liara.run/api/payment",
+            "https://pcstore1.liara.run/api/payment",
             json=payment_data,
             headers=headers
         )
@@ -809,6 +809,7 @@ async def handle_voice_search(update: Update, context: ContextTypes.DEFAULT_TYPE
 # تابع جستجو با متن (همون logic /search ولی بدون دستور)
 async def perform_search_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     try:
+        print(f"🔍 Raw text: {repr(text)}")
         search_query = f"%{text}%"
         cursor.execute("""
             SELECT id, name, brand, description, image_path, price, discount 
@@ -931,3 +932,4 @@ if __name__ == "__main__":
         # برای توسعه محلی از polling استفاده می‌کنیم
 
         app.run_polling()
+
